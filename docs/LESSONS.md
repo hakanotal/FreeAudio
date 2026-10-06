@@ -56,7 +56,7 @@ Hard-won constraints. Each one cost real debugging time; don't relearn them.
 - Lock mutable state that is read from multiple threads.
 - Set `NSWindow.isReleasedWhenClosed = false` for windows you keep in a dictionary.
 - Don't mutate a dictionary while iterating it; collect the keys first.
-- Wrap blocking system calls in a timeout (`CGHelpers.runWithTimeout`, `HALQueue.run`). It returns on timeout, but the stuck call keeps running on its thread.
+- Wrap blocking system calls in a timeout (`HALQueue.run`; FreeDisplay's `CGHelpers.runWithTimeout`). It returns on timeout, but the stuck call keeps running on its thread.
 - The single-instance check must tolerate short-lived copies: an old instance that is still quitting, or a `--dump-audio` run, made a fresh launch exit at once. A manual launch now waits up to 2 s for other copies to go away.
 - Event tap callbacks don't own the passed-in event: return `Unmanaged.passUnretained(event)` to pass it through. `passRetained` leaks one event per call.
 - Swift 6 inserts a runtime main-thread check into closures created in a `@MainActor` context and passed as non-`@Sendable` parameters. If such a closure runs on another queue (DDC completions, XPC handlers, audio callbacks), the app traps. Mark completion handlers that run off-main `@Sendable`.

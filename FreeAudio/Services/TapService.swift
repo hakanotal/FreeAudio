@@ -256,7 +256,7 @@ final class TapService: ObservableObject, @unchecked Sendable {
     func reconcile() {
         let actions = EngineDiff.actions(current: specs, desired: desiredSpecs())
         if !actions.isEmpty {
-            engineLog.notice("reconcile: \(actions.count) action(s): \(String(describing: actions), privacy: .public)")
+            engineLog.debug("reconcile: \(actions.count) action(s): \(String(describing: actions), privacy: .public)")
         }
         apply(actions)
     }

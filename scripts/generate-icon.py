@@ -1,147 +1,78 @@
 #!/usr/bin/env python3
-"""Generate FreeAudio app icon (1024x1024)."""
+"""Generate the FreeAudio app icon: FreeDisplay's blue-to-purple tile with a white speaker and
+sound waves. Writes every size into FreeAudio/Assets.xcassets/AppIcon.appiconset.
 
-import math
-from PIL import Image, ImageDraw, ImageFont
+    python3 scripts/generate-icon.py      (needs Pillow: pip3 install pillow)
+"""
+
+import os
+from PIL import Image, ImageDraw, ImageFilter
 
 SIZE = 1024
-CORNER_RADIUS = int(SIZE * 0.18)  # ~18% corner radius
+CORNER_RADIUS = int(SIZE * 0.18)
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ICONSET = os.path.join(ROOT, "FreeAudio", "Assets.xcassets", "AppIcon.appiconset")
+SIZES = [16, 32, 64, 128, 256, 512, 1024]
 
-def make_rounded_rect_mask(size, radius):
+
+def rounded_mask(size, radius):
     mask = Image.new("L", (size, size), 0)
-    d = ImageDraw.Draw(mask)
-    d.rounded_rectangle([0, 0, size - 1, size - 1], radius=radius, fill=255)
+    ImageDraw.Draw(mask).rounded_rectangle([0, 0, size - 1, size - 1], radius=radius, fill=255)
     return mask
 
-def draw_gradient(draw, size, color1, color2):
-    """Blue-to-purple diagonal gradient."""
-    r1, g1, b1 = color1
-    r2, g2, b2 = color2
+
+def gradient(size, top, bottom):
+    """Vertical gradient, the same colours as FreeDisplay (#4A90D9 → #7B68EE)."""
+    img = Image.new("RGBA", (size, size))
+    draw = ImageDraw.Draw(img)
     for y in range(size):
         t = y / (size - 1)
-        r = int(r1 + (r2 - r1) * t)
-        g = int(g1 + (g2 - g1) * t)
-        b = int(b1 + (b2 - b1) * t)
-        draw.line([(0, y), (size, y)], fill=(r, g, b, 255))
+        color = tuple(int(a + (b - a) * t) for a, b in zip(top, bottom)) + (255,)
+        draw.line([(0, y), (size, y)], fill=color)
+    return img
+
+
+def speaker_layer(scale=1.0, offset=(0, 0)):
+    """White speaker and three sound waves on a transparent layer."""
+    layer = Image.new("RGBA", (SIZE, SIZE), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(layer)
+    ox, oy = offset
+
+    def p(x, y):
+        return (int(SIZE * x * scale + ox), int(SIZE * y * scale + oy))
+
+    white = (255, 255, 255, 235)
+    # Speaker body and cone.
+    draw.rounded_rectangle([p(0.20, 0.405), p(0.33, 0.595)], radius=int(SIZE * 0.022), fill=white)
+    draw.polygon([p(0.31, 0.405), p(0.48, 0.265), p(0.48, 0.735), p(0.31, 0.595)], fill=white)
+    draw.rounded_rectangle([p(0.455, 0.265), p(0.50, 0.735)], radius=int(SIZE * 0.022), fill=white)
+
+    # Sound waves: concentric arcs, fading outwards.
+    center = p(0.50, 0.50)
+    width = int(SIZE * 0.042)
+    for radius, alpha in [(0.13, 235), (0.215, 200), (0.30, 165)]:
+        r = int(SIZE * radius)
+        box = [center[0] - r, center[1] - r, center[0] + r, center[1] + r]
+        draw.arc(box, start=-42, end=42, fill=(255, 255, 255, alpha), width=width)
+    return layer
+
 
 def main():
-    img = Image.new("RGBA", (SIZE, SIZE), (0, 0, 0, 0))
+    tile = Image.new("RGBA", (SIZE, SIZE), (0, 0, 0, 0))
+    tile.paste(gradient(SIZE, (74, 144, 217), (123, 104, 238)), (0, 0), rounded_mask(SIZE, CORNER_RADIUS))
 
-    # Draw gradient background
-    bg = Image.new("RGBA", (SIZE, SIZE), (0, 0, 0, 255))
-    bg_draw = ImageDraw.Draw(bg)
-    draw_gradient(bg_draw, SIZE, (74, 144, 217), (123, 104, 238))  # #4A90D9 → #7B68EE
+    # Soft shadow under the speaker, like the monitor in FreeDisplay's icon.
+    shadow = speaker_layer(offset=(int(SIZE * 0.012) - int(SIZE * 0.01), int(SIZE * 0.018)))
+    alpha = shadow.split()[3].point(lambda a: int(a * 0.25))
+    shadow = Image.merge("RGBA", (Image.new("L", shadow.size, 0),) * 3 + (alpha,)).filter(ImageFilter.GaussianBlur(SIZE * 0.012))
+    tile = Image.alpha_composite(tile, shadow)
+    tile = Image.alpha_composite(tile, speaker_layer(offset=(-int(SIZE * 0.01), 0)))
 
-    # Apply rounded rectangle mask
-    mask = make_rounded_rect_mask(SIZE, CORNER_RADIUS)
-    img.paste(bg, (0, 0), mask)
+    for size in SIZES:
+        path = os.path.join(ICONSET, f"icon_{size}.png")
+        tile.resize((size, size), Image.LANCZOS).save(path, "PNG")
+        print(f"Saved: {path}")
 
-    draw = ImageDraw.Draw(img)
-
-    # Monitor body dimensions
-    cx, cy = SIZE // 2, SIZE // 2
-    mon_w = int(SIZE * 0.58)
-    mon_h = int(SIZE * 0.40)
-    mon_x = cx - mon_w // 2
-    mon_y = cy - mon_h // 2 - int(SIZE * 0.03)
-    mon_radius = int(SIZE * 0.03)
-
-    # Shadow behind monitor
-    shadow_offset = int(SIZE * 0.015)
-    shadow_color = (0, 0, 0, 60)
-    shadow_img = Image.new("RGBA", (SIZE, SIZE), (0, 0, 0, 0))
-    shadow_draw = ImageDraw.Draw(shadow_img)
-    shadow_draw.rounded_rectangle(
-        [mon_x + shadow_offset, mon_y + shadow_offset,
-         mon_x + mon_w + shadow_offset, mon_y + mon_h + shadow_offset],
-        radius=mon_radius, fill=shadow_color
-    )
-    img = Image.alpha_composite(img, shadow_img)
-    draw = ImageDraw.Draw(img)
-
-    # Monitor bezel (white with slight transparency)
-    bezel_color = (255, 255, 255, 220)
-    draw.rounded_rectangle(
-        [mon_x, mon_y, mon_x + mon_w, mon_y + mon_h],
-        radius=mon_radius, fill=bezel_color
-    )
-
-    # Screen area inside bezel
-    bezel_thick = int(SIZE * 0.025)
-    scr_x = mon_x + bezel_thick
-    scr_y = mon_y + bezel_thick
-    scr_w = mon_w - bezel_thick * 2
-    scr_h = mon_h - bezel_thick * 2 - int(SIZE * 0.015)  # bottom chin
-    scr_radius = int(SIZE * 0.01)
-
-    screen_color = (30, 40, 80, 255)
-    draw.rounded_rectangle(
-        [scr_x, scr_y, scr_x + scr_w, scr_y + scr_h],
-        radius=scr_radius, fill=screen_color
-    )
-
-    # Monitor stand - neck
-    neck_w = int(SIZE * 0.06)
-    neck_h = int(SIZE * 0.10)
-    neck_x = cx - neck_w // 2
-    neck_y = mon_y + mon_h
-    draw.rectangle(
-        [neck_x, neck_y, neck_x + neck_w, neck_y + neck_h],
-        fill=(255, 255, 255, 200)
-    )
-
-    # Monitor stand - base
-    base_w = int(SIZE * 0.24)
-    base_h = int(SIZE * 0.03)
-    base_x = cx - base_w // 2
-    base_y = neck_y + neck_h
-    base_radius = int(SIZE * 0.01)
-    draw.rounded_rectangle(
-        [base_x, base_y, base_x + base_w, base_y + base_h],
-        radius=base_radius, fill=(255, 255, 255, 200)
-    )
-
-    # Draw "F" letter on screen
-    letter_cx = scr_x + scr_w // 2
-    letter_cy = scr_y + scr_h // 2
-
-    font_size = int(scr_h * 0.72)
-    letter_color = (255, 255, 255, 255)
-
-    # Draw F using rectangles (bold, clean)
-    stroke = int(font_size * 0.18)
-    f_h = int(font_size * 0.85)
-    f_w = int(font_size * 0.58)
-
-    fx = letter_cx - f_w // 2
-    fy = letter_cy - f_h // 2
-
-    # Vertical stroke
-    draw.rectangle([fx, fy, fx + stroke, fy + f_h], fill=letter_color)
-
-    # Top horizontal bar
-    draw.rectangle([fx, fy, fx + f_w, fy + stroke], fill=letter_color)
-
-    # Middle horizontal bar (slightly shorter)
-    mid_w = int(f_w * 0.80)
-    mid_y = fy + int(f_h * 0.48)
-    draw.rectangle([fx, mid_y, fx + mid_w, mid_y + stroke], fill=letter_color)
-
-    # Add subtle screen reflection
-    refl_img = Image.new("RGBA", (SIZE, SIZE), (0, 0, 0, 0))
-    refl_draw = ImageDraw.Draw(refl_img)
-    refl_points = [
-        (scr_x + int(scr_w * 0.05), scr_y + int(scr_h * 0.05)),
-        (scr_x + int(scr_w * 0.50), scr_y + int(scr_h * 0.05)),
-        (scr_x + int(scr_w * 0.35), scr_y + int(scr_h * 0.40)),
-        (scr_x + int(scr_w * 0.05), scr_y + int(scr_h * 0.30)),
-    ]
-    refl_draw.polygon(refl_points, fill=(255, 255, 255, 18))
-    img = Image.alpha_composite(img, refl_img)
-
-    out_path = "/Users/jm/Desktop/FreeAudio/scripts/icon_1024.png"
-    img.save(out_path, "PNG")
-    print(f"Saved: {out_path}")
 
 if __name__ == "__main__":
     main()

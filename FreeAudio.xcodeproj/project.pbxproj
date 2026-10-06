@@ -32,7 +32,6 @@
 		A9CF8CB6E9C4B412D899C502 /* HALQueue.swift in Sources */ = {isa = PBXBuildFile; fileRef = 797A953A63D6C834D1E2C0E3 /* HALQueue.swift */; };
 		AC71AF9152CB06ED0C2116E8 /* FreeAudioApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = D39E766607C217948DA6596C /* FreeAudioApp.swift */; };
 		B1E5B061361F02AB81514946 /* AppAudioService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B13EE3FCC43EA2F2A0C420E6 /* AppAudioService.swift */; };
-		BB2A5691C28543C1A85A6B60 /* CGHelpers.swift in Sources */ = {isa = PBXBuildFile; fileRef = A70B5EE5BF7D3174CA30C2D9 /* CGHelpers.swift */; };
 		C0A2C6786E588C94C2055850 /* AudioDevice.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A209D634AEF05223B9DE900 /* AudioDevice.swift */; };
 		CA0F4CF2D0BE2C8505A12467 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 81520FBB10DFE9FEEE5D2F02 /* Assets.xcassets */; };
 		D234431EBB87F3AB51834410 /* MenuBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B396402B4D3659809C1E3D8 /* MenuBarView.swift */; };
@@ -61,7 +60,6 @@
 		8A2CD185EED4B4F0FDC13139 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		94C22651E0A0A064A8BB2D58 /* AppListSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppListSection.swift; sourceTree = "<group>"; };
 		9BD0CB507E69C4641086C93B /* CoreAudio+Extensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "CoreAudio+Extensions.swift"; sourceTree = "<group>"; };
-		A70B5EE5BF7D3174CA30C2D9 /* CGHelpers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CGHelpers.swift; sourceTree = "<group>"; };
 		AC51A2C9BDC44FFB2E139AFC /* TapEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TapEngine.swift; sourceTree = "<group>"; };
 		B13EE3FCC43EA2F2A0C420E6 /* AppAudioService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppAudioService.swift; sourceTree = "<group>"; };
 		B14C98DEE9A713C795553AF5 /* FreeAudio.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = FreeAudio.entitlements; sourceTree = "<group>"; };
@@ -119,7 +117,6 @@
 			children = (
 				B13EE3FCC43EA2F2A0C420E6 /* AppAudioService.swift */,
 				6FA3D5272E535040F850AE72 /* AudioManager.swift */,
-				A70B5EE5BF7D3174CA30C2D9 /* CGHelpers.swift */,
 				CAC3EFA2E467F2A499FB7115 /* DeviceService.swift */,
 				224A5C9BA92ED53216BD1C12 /* DeviceVolumeService.swift */,
 				458572C175A26C2671406A89 /* LaunchService.swift */,
@@ -254,7 +251,6 @@
 				C0A2C6786E588C94C2055850 /* AudioDevice.swift in Sources */,
 				A13D7AC65DC8CEFC83B5A339 /* AudioManager.swift in Sources */,
 				55A47BCCE59BB39AC5EDF9C0 /* AudioSettingsRows.swift in Sources */,
-				BB2A5691C28543C1A85A6B60 /* CGHelpers.swift in Sources */,
 				867B67AAC85C33CEECDEFE89 /* CoreAudio+Extensions.swift in Sources */,
 				461F6621EC8707FDDA5A2D43 /* DeviceService.swift in Sources */,
 				4C7817C07064162BAF486AF5 /* DeviceSetting.swift in Sources */,
@@ -346,7 +342,7 @@
 				CODE_SIGN_ENTITLEMENTS = FreeAudio/FreeAudio.entitlements;
 				CODE_SIGN_IDENTITY = "-";
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = FreeAudio/Info.plist;
@@ -357,7 +353,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 27.0;
-				MARKETING_VERSION = 0.1;
+				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.freeaudio.app;
 				SDKROOT = macosx;
 				SWIFT_STRICT_CONCURRENCY = minimal;
@@ -374,7 +370,7 @@
 				CODE_SIGN_ENTITLEMENTS = FreeAudio/FreeAudio.entitlements;
 				CODE_SIGN_IDENTITY = "-";
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = FreeAudio/Info.plist;
@@ -385,7 +381,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 27.0;
-				MARKETING_VERSION = 0.1;
+				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.freeaudio.app;
 				SDKROOT = macosx;
 				SWIFT_STRICT_CONCURRENCY = minimal;
