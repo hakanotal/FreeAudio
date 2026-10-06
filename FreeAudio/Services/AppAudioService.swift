@@ -9,8 +9,8 @@ final class AppAudioService: ObservableObject, @unchecked Sendable {
 
     /// Apps playing audio (or that stopped less than `rowGrace` ago), sorted by name.
     @Published private(set) var apps: [AudioApp] = []
-    /// Every grouped audio client, playing or not (diagnostics).
-    private(set) var allApps: [AudioApp] = []
+    /// Every grouped audio client, playing or not. `TapService` follows this list.
+    @Published private(set) var allApps: [AudioApp] = []
 
     /// Faster polling while the panel is open. Listeners for `IsRunningOutput` don't always fire,
     /// so the poll is the backstop that keeps rows accurate.
@@ -75,7 +75,7 @@ final class AppAudioService: ObservableObject, @unchecked Sendable {
         updateRunningListeners(for: Set(processes.map(\.id)))
 
         let grouped = AppGrouping.group(records, ownPID: ownPID, appForPID: Self.appInfo(forPID:), appForBundlePath: Self.appInfo(forBundlePath:))
-        allApps = grouped
+        if grouped != allApps { allApps = grouped }
         let now = Date()
         for app in grouped where app.isPlaying { lastPlaying[app.id] = now }
         let visible = grouped.filter { app in

@@ -1,8 +1,9 @@
 import SwiftUI
 
-/// Apps playing audio. Read-only in this version; per-app volume arrives in Phase 2.
+/// Apps playing audio, each with its own volume, mute and boost.
 struct AppListSection: View {
     @ObservedObject private var appAudio = AppAudioService.shared
+    @ObservedObject private var taps = TapService.shared
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -13,6 +14,22 @@ struct AppListSection: View {
                 .padding(.horizontal, 12)
                 .padding(.top, 8)
                 .padding(.bottom, 2)
+
+            if taps.state == .needsPermission {
+                NoticeRow(
+                    icon: "lock.fill", color: .orange,
+                    text: L("Uygulama ses düzeyleri için Sistem Sesi Kaydı izni gerekli.",
+                            "Per-app volume needs System Audio Recording permission."),
+                    buttonTitle: L("Ayarları Aç", "Open Settings")
+                ) { PermissionService.shared.openSystemSettings() }
+            } else if taps.state == .stuck {
+                NoticeRow(
+                    icon: "exclamationmark.triangle.fill", color: .orange,
+                    text: L("Ses motoru yanıt vermiyor. Başka bir ses uygulaması çakışıyor olabilir.",
+                            "The audio engine isn't responding. Another audio app may be interfering."),
+                    buttonTitle: L("Yeniden Başlat", "Restart")
+                ) { TapService.shared.restartAll() }
+            }
 
             if appAudio.apps.isEmpty {
                 Text(L("Şu anda ses çalan uygulama yok", "No apps are playing audio"))
@@ -29,32 +46,134 @@ struct AppListSection: View {
     }
 }
 
-struct AppVolumeRow: View {
-    let app: AudioApp
-    @State private var isHovered = false
+// MARK: - NoticeRow
+
+/// A tinted message with one action (permission, engine problems).
+struct NoticeRow: View {
+    let icon: String
+    let color: Color
+    let text: String
+    let buttonTitle: String
+    let action: () -> Void
 
     var body: some View {
-        HStack(spacing: 8) {
-            Image(nsImage: AppAudioService.shared.icon(for: app))
-                .resizable()
-                .frame(width: 20, height: 20)
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: icon)
+                .foregroundColor(color)
+                .frame(width: 16)
                 .accessibilityHidden(true)
-            Text(app.name)
-                .font(.body)
-                .lineLimit(1)
-                .truncationMode(.tail)
-            Spacer()
-            Image(systemName: "waveform")
+            Text(text)
                 .font(.caption)
-                .foregroundColor(app.isPlaying ? .accentColor : .secondary)
-                .opacity(app.isPlaying ? 1 : 0.4)
-                .help(app.isPlaying ? L("Ses çalıyor", "Playing audio") : L("Az önce durdu", "Just stopped"))
-                .accessibilityHidden(true)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 4)
+            Button(buttonTitle, action: action)
+                .buttonStyle(.borderless)
+                .font(.caption)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
-        .background(Color.primary.opacity(isHovered ? 0.06 : 0))
-        .onHover { isHovered = $0 }
+        .background(color.opacity(0.08))
+        .cornerRadius(6)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 2)
+    }
+}
+
+// MARK: - AppVolumeRow
+
+struct AppVolumeRow: View {
+    let app: AudioApp
+    @ObservedObject private var settings = SettingsService.shared
+    @State private var localVolume: Double = 1
+    @State private var isDragging = false
+    @State private var isHovered = false
+    @State private var isExpanded = false
+    @State private var valueHighlighted = false
+    @State private var highlightTask: Task<Void, Never>?
+
+    private var setting: AppSetting { settings.appSetting(for: app.id) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 6) {
+                HStack(spacing: 6) {
+                    Image(nsImage: AppAudioService.shared.icon(for: app))
+                        .resizable()
+                        .frame(width: 20, height: 20)
+                        .opacity(app.isPlaying ? 1 : 0.6)
+                        .accessibilityHidden(true)
+                    Text(app.name)
+                        .font(.body)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    if setting.boost > 1 {
+                        Badge(text: "\(Int(setting.boost * 100))%", color: .purple)
+                            .help(L("Güçlendirme açık", "Boost is on"))
+                    }
+                    Spacer(minLength: 4)
+                }
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) { isExpanded.toggle() }
+                }
+                .help(L("Ayrıntılar için tıklayın", "Click for details"))
+
+                Button {
+                    settings.updateAppSetting(app.id, name: app.name) { $0.muted.toggle() }
+                } label: {
+                    Image(systemName: setting.muted ? "speaker.slash.fill" : "speaker.fill")
+                        .font(.caption)
+                        .foregroundColor(setting.muted ? .red : .secondary)
+                        .frame(width: 16)
+                }
+                .buttonStyle(.plain)
+                .help(setting.muted ? L("\(app.name) sesini aç", "Unmute \(app.name)") : L("\(app.name) sesini kapat", "Mute \(app.name)"))
+                .accessibilityLabel(setting.muted ? L("Sesi aç", "Unmute") : L("Sesi kapat", "Mute"))
+
+                Slider(value: $localVolume, in: 0...1) { editing in
+                    isDragging = editing
+                    if !editing {
+                        commit(localVolume)
+                        withAnimation(.easeOut(duration: 0.3)) { valueHighlighted = true }
+                        highlightTask?.cancel()
+                        highlightTask = Task { @MainActor in
+                            try? await Task.sleep(nanoseconds: 400_000_000)
+                            withAnimation(.easeOut(duration: 0.3)) { valueHighlighted = false }
+                        }
+                    }
+                }
+                .controlSize(.small)
+                .frame(width: 92)
+                .opacity(setting.muted ? 0.5 : 1)
+                .onChange(of: localVolume) { _, newValue in
+                    guard isDragging else { return }
+                    commit(newValue)
+                }
+                .accessibilityLabel(L("\(app.name) ses düzeyi", "\(app.name) volume"))
+                .accessibilityValue("\(Int((localVolume * 100).rounded()))%")
+                .help(L("\(app.name) ses düzeyi", "\(app.name) volume"))
+
+                Text("\(Int((localVolume * 100).rounded()))%")
+                    .font(.caption)
+                    .foregroundColor(valueHighlighted ? .accentColor : .secondary)
+                    .frame(width: 34, alignment: .trailing)
+                    .monospacedDigit()
+                    .contentTransition(.numericText())
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 5)
+            .background(Color.primary.opacity(isHovered ? 0.06 : 0))
+            .onHover { isHovered = $0 }
+
+            if isExpanded {
+                AppDetailView(app: app)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+        .onAppear { localVolume = setting.volume }
+        .onChange(of: setting.volume) { _, newValue in
+            if !isDragging, abs(newValue - localVolume) >= 0.005 { localVolume = newValue }
+        }
         .contextMenu {
             Button {
                 NSPasteboard.general.clearContents()
@@ -62,10 +181,93 @@ struct AppVolumeRow: View {
             } label: {
                 Label(L("Paket kimliğini kopyala", "Copy Bundle ID"), systemImage: "doc.on.doc")
             }
+            Button {
+                SettingsService.shared.resetAppSetting(app.id)
+            } label: {
+                Label(L("Varsayılana döndür", "Reset to Default"), systemImage: "arrow.counterclockwise")
+            }
+            .disabled(setting.isDefault)
         }
-        .help(app.helperBundleIDs.isEmpty ? app.name
-              : L("\(app.name) (\(app.pids.count) süreç)", "\(app.name) (\(app.pids.count) processes)"))
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(app.isPlaying ? L("\(app.name), ses çalıyor", "\(app.name), playing audio") : app.name)
+    }
+
+    private func commit(_ value: Double) {
+        settings.updateAppSetting(app.id, name: app.name) { setting in
+            setting.volume = value
+            // Moving the slider unmutes, like the system volume.
+            if setting.muted, value > 0 { setting.muted = false }
+        }
+    }
+}
+
+// MARK: - AppDetailView
+
+/// Expanded panel under an app row: boost, reset and engine status.
+struct AppDetailView: View {
+    let app: AudioApp
+    @ObservedObject private var settings = SettingsService.shared
+    @ObservedObject private var taps = TapService.shared
+
+    private var setting: AppSetting { settings.appSetting(for: app.id) }
+
+    private var status: (text: String, color: Color) {
+        if taps.failedKeys.contains(app.id) {
+            return (L("Ses yakalanamadı; birazdan yeniden denenecek", "Couldn't capture audio; will retry shortly"), .orange)
+        }
+        if setting.isDefault {
+            return (L("Varsayılan: FreeAudio bu uygulamaya dokunmuyor", "Default: FreeAudio leaves this app alone"), .secondary)
+        }
+        if taps.activeKeys.contains(app.id) {
+            return (setting.muted ? L("Sessize alındı", "Muted") : L("Ses FreeAudio üzerinden ayarlanıyor", "Volume is controlled by FreeAudio"), .green)
+        }
+        return (L("Bekliyor", "Waiting"), .secondary)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Text(L("Güçlendirme", "Boost"))
+                    .font(.caption)
+                Spacer(minLength: 8)
+                Picker("", selection: Binding(
+                    get: { setting.boost },
+                    set: { value in settings.updateAppSetting(app.id, name: app.name) { $0.boost = value } }
+                )) {
+                    Text(L("Kapalı", "Off")).tag(1.0)
+                    Text(verbatim: "150%").tag(1.5)
+                    Text(verbatim: "200%").tag(2.0)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .controlSize(.small)
+                .fixedSize()
+                .help(L("Sessiz uygulamaları %200'e kadar yükseltin", "Raise quiet apps up to 200%"))
+            }
+
+            HStack(spacing: 4) {
+                Circle()
+                    .fill(status.color)
+                    .frame(width: 5, height: 5)
+                    .accessibilityHidden(true)
+                Text(status.text)
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+                    .lineLimit(2)
+                Spacer(minLength: 4)
+                Button(L("Sıfırla", "Reset")) {
+                    settings.resetAppSetting(app.id)
+                }
+                .buttonStyle(.borderless)
+                .font(.caption)
+                .disabled(setting.isDefault)
+                .help(L("Ses düzeyini, sessizi ve güçlendirmeyi varsayılana döndür", "Reset volume, mute and boost to default"))
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(Color(nsColor: .controlBackgroundColor).opacity(0.4))
+        .cornerRadius(6)
+        .padding(.leading, 32)
+        .padding(.trailing, 8)
+        .padding(.bottom, 4)
     }
 }

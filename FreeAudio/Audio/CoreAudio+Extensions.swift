@@ -2,6 +2,9 @@ import AudioToolbox
 import CoreAudio
 import Foundation
 
+/// UID prefix of FreeAudio's own private aggregate devices (never listed as outputs).
+let freeAudioAggregatePrefix = "com.freeaudio.agg."
+
 /// Property addresses FreeAudio reads or listens to.
 enum CoreAudioAddress {
     static let devices = PropertyAddress(kAudioHardwarePropertyDevices)

@@ -19,6 +19,7 @@ final class SettingsService: ObservableObject, @unchecked Sendable {
 
     private init() {
         loadAll()
+        loadAppSettings()
     }
 
     // MARK: - Keys
@@ -43,6 +44,76 @@ final class SettingsService: ObservableObject, @unchecked Sendable {
 
     @Published var checkUpdatesOnLaunch: Bool = true {
         didSet { defaults.set(checkUpdatesOnLaunch, forKey: Keys.checkUpdatesOnLaunch) }
+    }
+
+    // MARK: - Per-App Settings
+
+    /// Saved per-app settings keyed by `AudioApp.id`. Apps at default settings have no entry.
+    @Published private(set) var appSettings: [String: AppSetting] = [:]
+
+    private static let appSettingsFile = "apps.json"
+    private var appSettingsSaveTask: Task<Void, Never>?
+
+    func appSetting(for key: String) -> AppSetting {
+        appSettings[key] ?? AppSetting()
+    }
+
+    /// Changes one app's settings and schedules a save. Entries back at default are removed.
+    func updateAppSetting(_ key: String, name: String?, _ change: (inout AppSetting) -> Void) {
+        var setting = appSetting(for: key)
+        change(&setting)
+        if let name { setting.name = name }
+        let newValue: AppSetting? = setting.isDefault ? nil : setting
+        guard appSettings[key] != newValue else { return }
+        appSettings[key] = newValue
+        scheduleAppSettingsSave()
+    }
+
+    func resetAppSetting(_ key: String) {
+        guard appSettings.removeValue(forKey: key) != nil else { return }
+        scheduleAppSettingsSave()
+    }
+
+    func resetAllAppSettings() {
+        guard !appSettings.isEmpty else { return }
+        appSettings = [:]
+        scheduleAppSettingsSave()
+    }
+
+    private func loadAppSettings() {
+        let url = supportDir.appendingPathComponent(Self.appSettingsFile)
+        guard let data = try? Data(contentsOf: url) else { return }
+        do {
+            appSettings = try JSONDecoder().decode(AppSettingsFile.self, from: data).apps.filter { !$0.value.isDefault }
+        } catch {
+            // Keep the unreadable file for inspection instead of overwriting it on the next save.
+            let backup = supportDir.appendingPathComponent("apps.backup.json")
+            try? FileManager.default.removeItem(at: backup)
+            try? FileManager.default.moveItem(at: url, to: backup)
+            NSLog("[SettingsService] apps.json unreadable (%@); moved to apps.backup.json", error.localizedDescription)
+        }
+    }
+
+    /// Slider drags change settings many times a second; write at most every 500 ms.
+    private func scheduleAppSettingsSave() {
+        appSettingsSaveTask?.cancel()
+        appSettingsSaveTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(500))
+            guard !Task.isCancelled else { return }
+            self?.saveAppSettingsNow()
+        }
+    }
+
+    /// Writes pending app settings immediately (on quit).
+    func flushAppSettings() {
+        guard appSettingsSaveTask != nil else { return }
+        appSettingsSaveTask?.cancel()
+        saveAppSettingsNow()
+    }
+
+    private func saveAppSettingsNow() {
+        appSettingsSaveTask = nil
+        save(AppSettingsFile(apps: appSettings), filename: Self.appSettingsFile)
     }
 
     // MARK: - JSON Persistence Helpers

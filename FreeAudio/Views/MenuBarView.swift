@@ -175,7 +175,10 @@ struct MenuBarView: View {
         // Keeps the panel pinned under the menu bar while it grows/shrinks.
         .windowResizeAnchor(.top)
         // Poll the app list faster while the panel is open.
-        .onAppear { AppAudioService.shared.panelVisible = true }
+        .onAppear {
+            AppAudioService.shared.panelVisible = true
+            PermissionService.shared.refresh()
+        }
         .onDisappear { AppAudioService.shared.panelVisible = false }
         .task {
             if settings.checkUpdatesOnLaunch {
@@ -278,6 +281,8 @@ struct SettingsView: View {
             .controlSize(.small)
             .padding(.horizontal, 12)
             .help(L("Her açılışta yeni sürüm olup olmadığını otomatik denetle", "Automatically check for a new version on every launch"))
+
+            AudioSettingsRows()
         }
         .padding(.vertical, 6)
     }

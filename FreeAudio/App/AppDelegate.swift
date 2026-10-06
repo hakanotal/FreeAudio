@@ -53,6 +53,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    func applicationWillTerminate(_ notification: Notification) {
+        SettingsService.shared.flushAppSettings()
+        // Destroy taps and aggregate devices before exiting (they'd also vanish with the process).
+        TapService.shared.shutdown()
+    }
+
     // MARK: - Startup
 
     private func startServices() {

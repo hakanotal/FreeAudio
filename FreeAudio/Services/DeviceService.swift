@@ -7,9 +7,6 @@ final class DeviceService: ObservableObject, @unchecked Sendable {
     static let shared = DeviceService()
     private init() {}
 
-    /// UID prefix of FreeAudio's own private aggregate devices (never listed).
-    static let ownAggregatePrefix = "com.freeaudio.agg."
-
     @Published private(set) var outputDevices: [AudioDevice] = []
     @Published private(set) var defaultOutputUID: String?
 
@@ -53,7 +50,7 @@ final class DeviceService: ObservableObject, @unchecked Sendable {
     }
 
     private static func makeOutputDevice(_ device: AudioHardwareDevice) -> AudioDevice? {
-        guard let uid = try? device.uid, !uid.hasPrefix(ownAggregatePrefix),
+        guard let uid = try? device.uid, !uid.hasPrefix(freeAudioAggregatePrefix),
               (try? device.isHidden) != true,
               (try? device.isAlive) != false,
               ((try? device.streams) ?? []).contains(where: { (try? $0.direction) == .output })
