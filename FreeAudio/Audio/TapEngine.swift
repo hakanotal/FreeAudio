@@ -104,8 +104,8 @@ func freeAudioIOProc(
 
 // MARK: - Engine
 
-/// One controlled app: a process tap and, for the `app` kind, a private aggregate device with an
-/// IOProc that plays the tapped audio at the app's gain. `start`, `stop`, `updateProcesses` and
+/// One controlled app: a process tap and a private aggregate device with an IOProc that plays the
+/// tapped audio at the app's gain (0 when muted). `start`, `stop`, `updateProcesses` and
 /// `restartIO` run on `HALQueue`; gain and stats are safe from any thread.
 final class TapEngine: @unchecked Sendable {
     let spec: EngineSpec
@@ -165,8 +165,6 @@ final class TapEngine: @unchecked Sendable {
               everHadSound: rt.pointee.everHadSound.load(ordering: .relaxed))
     }
 
-    var hasAggregate: Bool { spec.kind == .app }
-
     // MARK: Setup and teardown (HAL queue)
 
     func start() throws {
@@ -177,7 +175,7 @@ final class TapEngine: @unchecked Sendable {
             description.bundleIDs = spec.bundleIDs
             description.isProcessRestoreEnabled = true
         }
-        description.muteBehavior = spec.kind == .app ? .mutedWhenTapped : .muted
+        description.muteBehavior = .mutedWhenTapped
         description.isPrivate = true
         description.name = "FreeAudio \(spec.key)"
         description.uuid = UUID()
@@ -186,11 +184,6 @@ final class TapEngine: @unchecked Sendable {
             throw EngineError("makeProcessTap returned nil")
         }
         self.tap = tap
-        guard spec.kind == .app else {
-            engineLog.info("\(self.spec.key, privacy: .public): muted tap \(tap.id)")
-            return
-        }
-
         guard let device = try system.device(forUID: spec.deviceUID) else {
             throw EngineError("output device \(spec.deviceUID) not found")
         }

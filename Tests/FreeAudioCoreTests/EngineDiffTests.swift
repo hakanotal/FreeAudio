@@ -2,9 +2,9 @@ import Testing
 @testable import FreeAudioCore
 
 struct EngineDiffTests {
-    private func spec(_ key: String, kind: EngineSpec.Kind = .app, device: String = "speakers",
+    private func spec(_ key: String, device: String = "speakers",
                       processes: [UInt32] = [1], bundleIDs: [String] = [], gain: Float = 0.5) -> EngineSpec {
-        EngineSpec(key: key, kind: kind, deviceUID: device, processObjectIDs: processes, bundleIDs: bundleIDs, gain: gain)
+        EngineSpec(key: key, deviceUID: device, processObjectIDs: processes, bundleIDs: bundleIDs, gain: gain)
     }
 
     @Test func createAndDestroy() {
@@ -27,15 +27,15 @@ struct EngineDiffTests {
         #expect(actions.isEmpty)
     }
 
-    @Test func deviceOrKindChangeReplaces() {
+    @Test func deviceOrFollowedBundleIDsChangeReplaces() {
         #expect(EngineDiff.actions(current: ["a": spec("a")], desired: ["a": spec("a", device: "dell")]) == [.replace(spec("a", device: "dell"))])
-        #expect(EngineDiff.actions(current: ["a": spec("a")], desired: ["a": spec("a", kind: .muteOnly)]) == [.replace(spec("a", kind: .muteOnly))])
+        #expect(EngineDiff.actions(current: ["a": spec("a")], desired: ["a": spec("a", bundleIDs: ["a"])]) == [.replace(spec("a", bundleIDs: ["a"]))])
     }
 
-    @Test func muteOnlyIgnoresDeviceAndGain() {
-        let actions = EngineDiff.actions(current: ["a": spec("a", kind: .muteOnly, device: "x", gain: 0)],
-                                         desired: ["a": spec("a", kind: .muteOnly, device: "y", gain: 1)])
-        #expect(actions.isEmpty)
+    @Test func muteIsAGainChange() {
+        // Muting is gain 0 on the running engine: instant, click-free, no HAL work.
+        let actions = EngineDiff.actions(current: ["a": spec("a", gain: 0.5)], desired: ["a": spec("a", gain: 0)])
+        #expect(actions == [.setGain(key: "a", gain: 0)])
     }
 
     @Test func followedBundleIDsSkipSharedHelpers() {

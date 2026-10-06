@@ -1,19 +1,12 @@
 import Foundation
 
-/// What one tap engine should look like. `TapService` computes the desired set from apps,
-/// settings and permission; `EngineDiff` turns the difference into actions.
+/// What one tap engine should look like: a tap + private aggregate + IOProc that plays the app at
+/// `gain` (0 when muted). `TapService` computes the desired set from apps, settings and
+/// permission; `EngineDiff` turns the difference into actions.
 struct EngineSpec: Equatable, Sendable {
-    enum Kind: Equatable, Sendable {
-        /// Tap + private aggregate + IOProc that plays the app at `gain`.
-        case app
-        /// A bare muted tap, no aggregate (spike S6): silences the app at no cost.
-        case muteOnly
-    }
-
     /// The app's settings key (`AudioApp.id`).
     let key: String
-    var kind: Kind
-    /// Output device the aggregate plays to (unused for `muteOnly`).
+    /// Output device the aggregate plays to.
     var deviceUID: String
     /// Process objects in the tap (helpers whose bundle IDs other apps share are only here).
     var processObjectIDs: [UInt32]
@@ -24,7 +17,7 @@ struct EngineSpec: Equatable, Sendable {
 
 enum EngineAction: Equatable, Sendable {
     case create(EngineSpec)
-    /// Kind, device or followed bundle IDs changed: build the new engine, then remove the old one.
+    /// Device or followed bundle IDs changed: build the new engine, then remove the old one.
     case replace(EngineSpec)
     /// Same engine, different processes: update the tap description in place (spike S4).
     case updateProcesses(key: String, processObjectIDs: [UInt32])
@@ -47,15 +40,14 @@ enum EngineDiff {
                 actions.append(.create(want))
                 continue
             }
-            let deviceMatters = want.kind == .app
-            if want.kind != have.kind || want.bundleIDs != have.bundleIDs || (deviceMatters && want.deviceUID != have.deviceUID) {
+            if want.bundleIDs != have.bundleIDs || want.deviceUID != have.deviceUID {
                 actions.append(.replace(want))
                 continue
             }
             if Set(want.processObjectIDs) != Set(have.processObjectIDs) {
                 actions.append(.updateProcesses(key: key, processObjectIDs: want.processObjectIDs))
             }
-            if want.kind == .app, abs(want.gain - have.gain) > gainTolerance {
+            if abs(want.gain - have.gain) > gainTolerance {
                 actions.append(.setGain(key: key, gain: want.gain))
             }
         }

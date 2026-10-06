@@ -106,7 +106,7 @@ final class TapService: ObservableObject, @unchecked Sendable {
             if setting.isDefault {
                 // Back at default: keep a running engine at unity while the app plays, so dragging
                 // through 100% doesn't tear the tap down; drop it once the app is quiet.
-                if var existing = specs[app.id], existing.kind == .app, app.isPlaying {
+                if var existing = specs[app.id], app.isPlaying {
                     existing.gain = 1
                     existing.processObjectIDs = app.processObjectIDs
                     desired[app.id] = existing
@@ -122,11 +122,10 @@ final class TapService: ObservableObject, @unchecked Sendable {
             }
             desired[app.id] = EngineSpec(
                 key: app.id,
-                kind: setting.muted ? .muteOnly : .app,
                 deviceUID: app.outputDeviceUIDs.first(where: outputUIDs.contains) ?? defaultUID,
                 processObjectIDs: app.processObjectIDs,
                 bundleIDs: EngineDiff.followedBundleIDs(appBundleID: app.bundleID, helperBundleIDs: app.helperBundleIDs + (setting.helpers ?? [])),
-                gain: setting.gain)
+                gain: Self.gain(for: setting))
         }
         // Saved apps that aren't running get a pre-armed tap that follows their bundle ID, so
         // they're controlled from their first sound (spike S5: an empty tap costs nothing and
@@ -138,13 +137,19 @@ final class TapService: ObservableObject, @unchecked Sendable {
             if let failed = failureTimes[key], now.timeIntervalSince(failed) < Self.failureBackoff { continue }
             desired[key] = EngineSpec(
                 key: key,
-                kind: setting.muted ? .muteOnly : .app,
                 deviceUID: defaultUID,
                 processObjectIDs: [],
                 bundleIDs: EngineDiff.followedBundleIDs(appBundleID: key, helperBundleIDs: setting.helpers ?? []),
-                gain: setting.gain)
+                gain: Self.gain(for: setting))
         }
         return desired
+    }
+
+    /// Muting is gain 0 on the regular engine: a gain change fades in 30 ms with no HAL work.
+    /// (A bare `.muted` tap without an aggregate didn't silence a real app that the tap also
+    /// followed by bundle ID; see LESSONS.)
+    private static func gain(for setting: AppSetting) -> Float {
+        setting.muted ? 0 : setting.gain
     }
 
     // MARK: - Applying
@@ -231,10 +236,10 @@ final class TapService: ObservableObject, @unchecked Sendable {
 
     /// Fades an engine out and tears it down on the HAL queue.
     private func retire(_ engine: TapEngine) {
-        if engine.hasAggregate { engine.setGain(0) }
+        engine.setGain(0)
         Task { @MainActor in
             let outcome = await HALQueue.shared.run {
-                if engine.hasAggregate { usleep(40_000) }  // let the 30 ms ramp reach silence
+                usleep(40_000)  // let the 30 ms ramp reach silence
                 engine.stop()
             }
             if outcome == .timedOut { state = .stuck }
@@ -254,7 +259,7 @@ final class TapService: ObservableObject, @unchecked Sendable {
     /// Once a second: restart the IO of engines that have been silent, so the Mac can sleep.
     private func checkEngines() {
         let now = HostClock.now
-        for (key, engine) in engines where engine.hasAggregate {
+        for (key, engine) in engines {
             let stats = engine.stats
             guard stats.callbacks > 0 else { continue }
             let runningRecently = HostClock.seconds(now &- stats.lastCallbackHost) < 0.5
@@ -307,7 +312,7 @@ final class TapService: ObservableObject, @unchecked Sendable {
         specs.keys.sorted().map { key in
             let spec = specs[key]!
             let engine = engines[key]
-            return "  \(key): \(spec.kind) device=\(spec.deviceUID) gain=\(spec.gain) processes=\(spec.processObjectIDs) follows=\(spec.bundleIDs) callbacks=\(engine?.stats.callbacks ?? 0)"
+            return "  \(key): device=\(spec.deviceUID) gain=\(spec.gain) processes=\(spec.processObjectIDs) follows=\(spec.bundleIDs) callbacks=\(engine?.stats.callbacks ?? 0)"
         }
     }
 }

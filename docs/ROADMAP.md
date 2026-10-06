@@ -141,7 +141,7 @@ If S4 or S5 fail, the engine skips that feature (rebuild via crossfade instead; 
 **Results (2026-10-06, TapLab scripted runs on macOS 27.0.1; numbers in `docs/LESSONS.md`):**
 - **S1 pass.** Setup takes milliseconds and the aggregate is alive at once, so the readiness poll stays only as a safety net. The tap UID always matched the description. The gain ramp was measured, and you confirmed by ear that the app's own playback was replaced. Tapping an idle app gives no callbacks. Behaviour with permission denied is not tested yet (it needs a manual revoke).
 - **S2 pass** on the Dell (HDMI). Only Dell-bound audio is captured, there is no feedback at gain 1.0, and default switches are handled. Open: the IOProc keeps running on silence once the device's other audio stops (fold into S3).
-- **S6 pass.** The bare muted tap silences the app and `kill -9` restores it. Mute without boost will use a `muteOnly` engine.
+- **S6 pass, not used.** The bare muted tap silenced `afplay`, but in the app it did not silence Zen (a tap that also follows a bundle ID). Mute is gain 0 on the regular engine instead (see LESSONS).
 - **S9: works, but draws the old OSD.** The modern top-right volume HUD can't be triggered by apps, so `VolumeHUDService` becomes a small FreeAudio panel in the modern style (Phase 4) and the OSDUIHelper code goes away.
 - **S4 pass.** In-place description updates are fast and gapless: new helper processes join a running tap with no rebuild.
 - **S5 pass.** A tap with `bundleIDs` and `processRestoreEnabled` follows its app across relaunches, ignores other apps, and can be created before the app runs. App engines use them (see engine design).
@@ -181,7 +181,7 @@ Test on real hardware after each phase. Build with `./scripts/build-app-clt.sh`,
 
 1. Core: `VolumeCurve`, `RenderKernel`, `SoftLimiter`, `OutputGate`, `EngineDiff`, `AppSetting`, each with tests.
 2. Audio: `RealtimeState`, `HALQueue`, `TapEngine` (`app` kind; the `rest` kind is built and tested but switched on in Phase 4), `PrivateAPI` (dlsym wrappers).
-3. `TapService` reconciler with the lifetime rules, helper updates (S4 path or crossfaded rebuild), the IOProcStreamUsage write, a 20 ms mute ramp (or S6 muted tap), and boost with the limiter.
+3. `TapService` reconciler with the lifetime rules, helper updates (S4 path or crossfaded rebuild), the IOProcStreamUsage write, mute as gain 0 (30 ms ramp), and boost with the limiter.
 4. `PermissionService`: preflight before any tap is created. When denied, create no taps and show `PermissionRow` (opens `x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_ScreenCapture`; verify on 27). Safety net: if no engine has ever delivered non-zero audio and an engine sees only zeros for 2 s while its app runs output, tear everything down and show the row.
 5. `SettingsService`: `apps.json` with debounce and flush. Settings is re-applied when an app appears again.
 6. UI: interactive `AppVolumeRow`, `AppDetailView` (boost Off/150/200, reset), badges, the saved-settings list in Settings.
