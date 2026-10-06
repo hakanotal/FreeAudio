@@ -11,6 +11,16 @@ Hard-won constraints. Each one cost real debugging time; don't relearn them.
 - `TCCAccessPreflight(kTCCServiceAudioCapture)` returns 2 before the user was ever asked (0 = authorized, 1 = denied). (TapLab, 2026-10-06)
 - Helper grouping order: responsibility API, then the outermost `.app` in `proc_pidpath`, then the process's own bundle. Electron helpers can be `.app` bundles themselves (a Claude helper reported its own `bundleURL` ending in `.app`), so checking the own bundle first gives helpers their own rows. (TapLab, 2026-10-06)
 - `com.apple.WebKit.GPU` belongs to whichever app embeds WebKit (Outlook on this machine, not just Safari). Never tap or exclude by that bundle ID. (TapLab, 2026-10-06)
+- Spike results (TapLab, 2026-10-06, macOS 27.0.1, MacBook Pro speakers and a Dell S2721DGF over HDMI; details in the roadmap's spike table):
+  - Tap creation takes 3–6 ms, aggregate creation 4–8 ms, the aggregate is alive immediately and `AudioDeviceStart` returns in ~0.1 ms. The tap's `kAudioTapPropertyUID` equaled the description's UUID every time.
+  - A stereo-mixdown tap is 48 kHz, 2-channel, interleaved Float32. The IOProc gets one input buffer (the tap) and one output buffer, 512 frames, ~94 callbacks/s.
+  - Tapping an idle process: start returns instantly and the IOProc gets no callbacks until the process plays.
+  - An unmuted device-scoped tap still sees a process that another tap mutes. "Observer" taps can't prove muting, and the rest tap must exclude every controlled app explicitly.
+  - A bare `CATapMuted` tap with no aggregate silences an app; destroying it, or `kill -9` of the owner, brings the audio back at once.
+  - A device-scoped rest tap only captures audio bound for its device, doesn't recapture our own output when our process object (plus bundle ID) is excluded, and survives default-output switches without errors.
+  - Once a running rest tap's device has no other audio, its IOProc keeps running on silence (~94 callbacks/s). Check power and CPU before keeping it alive (S3).
+  - OSDUIHelper still works on macOS 27 but draws the old centered OSD. The modern volume HUD (top right) belongs to Control Center and can't be triggered by apps.
+- Core Audio reuses process object IDs after a process exits (three successive `afplay` PIDs all got object 123). Never cache an object ID beyond the process's lifetime.
 - A process gets a Core Audio process object as soon as it talks to the HAL, before it plays anything, so FreeAudio can exclude its own object from taps from the start. Process objects also exist for idle apps (`isRunningOutput == false`). (TapLab, 2026-10-06)
 
 ## Private APIs

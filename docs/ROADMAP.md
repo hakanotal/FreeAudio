@@ -14,7 +14,7 @@ This roadmap merges the brief, what FineTune teaches (and gets wrong), and the d
 |---|---|---|
 | License | FreeAudio stays **MIT**. FineTune is a design reference only. | Behaviours, API sequences, constants and pitfalls are reused as facts. No copied code, no line-by-line ports, no copied test fixtures. Add this rule to `CLAUDE.md`. |
 | Minimum macOS | **27.0** (overrides the brief's 14.2) | `CATapDescription.bundleIDs` / `processRestoreEnabled`, `Synchronization.Atomic`, `windowResizeAnchor` are available with no fallbacks. macOS 27 runs only on Apple silicon, so builds become **arm64 only**. |
-| Private APIs | **Approved:** `responsibility_get_pid_responsible_for_pid` and `TCCAccessPreflight`/`TCCAccessRequest` | Both loaded with `dlopen`/`dlsym`, with a public fallback when missing. The OSDUIHelper XPC (already in FreeDisplay) stays for the volume OSD. Record the approvals in `CLAUDE.md`. |
+| Private APIs | **Approved:** `responsibility_get_pid_responsible_for_pid` and `TCCAccessPreflight`/`TCCAccessRequest` | Both loaded with `dlopen`/`dlsym`, with a public fallback when missing. The OSDUIHelper XPC inherited from FreeDisplay is dropped: spike S9 showed it draws the old centered OSD. Record the approvals in `CLAUDE.md`. |
 | Xcode project | **Install XcodeGen** (`brew install xcodegen`, dev tool only) | Regenerate `FreeAudio.xcodeproj` from `project.yml` whenever files change. |
 | Boost | **Up to 200%**: Off / 150% / 200% | Soft limiter at the end of the chain. |
 | Tests | **Swift Testing package for pure logic** | `swift test` with the Command Line Tools (Testing.framework ships with CLT; XCTest does not). |
@@ -134,6 +134,13 @@ This follows the brief's mockup and FreeDisplay's style:
 
 If S4 or S5 fail, the engine skips that feature (rebuild via crossfade instead; no restore). If S6 passes, mute without boost uses a bare muted tap (no aggregate, nothing to rebuild).
 
+**Results (2026-10-06, TapLab scripted runs on macOS 27.0.1; numbers in `docs/LESSONS.md`):**
+- **S1 pass.** Setup takes milliseconds and the aggregate is alive at once, so the readiness poll stays only as a safety net. The tap UID always matched the description. The gain ramp was measured, and you confirmed by ear that the app's own playback was replaced. Tapping an idle app gives no callbacks. Behaviour with permission denied is not tested yet (it needs a manual revoke).
+- **S2 pass** on the Dell (HDMI). Only Dell-bound audio is captured, there is no feedback at gain 1.0, and default switches are handled. Open: the IOProc keeps running on silence once the device's other audio stops (fold into S3).
+- **S6 pass.** The bare muted tap silences the app and `kill -9` restores it. Mute without boost will use a `muteOnly` engine.
+- **S9: works, but draws the old OSD.** The modern top-right volume HUD can't be triggered by apps, so `VolumeHUDService` becomes a small FreeAudio panel in the modern style (Phase 4) and the OSDUIHelper code goes away.
+- **Still to run:** S3, S4, S5 (need new TapLab code), S7 (AirPods in a call), S8 (needs Safari, Chrome, an Electron app, Spotify and Zoom playing).
+
 ## Phases
 
 Test on real hardware after each phase. Build with `./scripts/build-app-clt.sh`, run `./scripts/test.sh`, and check logs with `log stream --predicate 'subsystem == "com.freeaudio.app"'`.
@@ -191,7 +198,7 @@ Phases 3 and 4 can swap if you want the Dell working day to day sooner; the cros
 1. `DeviceVolumeService` software tier: `devices.json`, x² curve, "Use software volume" override toggle in the device detail, and FreeAudio's own sounds scaled by hand.
 2. Switch on the `rest` engine with the ownership-invariant crossfade (S3). It exists while the device is software tier and below 100% or muted, with 2 s hysteresis.
 3. `VolumeKeyService`: the event tap from `BrightnessKeyService.swift` with media-key decoding (`Core/MediaKeyDecoder`). Consume keys only when the default output is software tier; otherwise pass them through so macOS behaves natively. Step 1/16, Option+Shift for 1/64, repeats handled, volume-up unmutes. Re-enable on `tapDisabledByTimeout`, re-check after wake, show Accessibility status in Settings with a button to the pane.
-4. `VolumeHUDService`: OSDUIHelper with `OSDImage.volume`/`.mute` and 16 chiclets (fallback panel if S9 failed). Optional: feedback pop honouring `com.apple.sound.beep.feedback`.
+4. `VolumeHUDService`: a non-activating panel at the top right in the style of the macOS 26/27 volume HUD (icon, device name, level bar), shown on the screen with the menu bar, fading after ~1.5 s. It replaces the OSDUIHelper code, which only draws the old centered OSD (S9). Optional: feedback pop honouring `com.apple.sound.beep.feedback`.
 
 **Check:** with the Dell as output, keys and slider change volume, show the OSD, and system alert sounds follow the level. On built-in speakers the keys behave exactly like macOS. FreeDisplay's brightness keys keep working with both event taps installed.
 
@@ -224,7 +231,6 @@ New icon (`scripts/generate-icon.py` audio variant). README in FreeDisplay's str
 - Tap behaviours are partly undocumented (stream indices, UID reassignment, in-place updates); the spikes exist for this.
 - The private APIs may change; the dlsym fallbacks keep the app working with weaker grouping and permission detection.
 - Calling apps lose echo cancellation while tapped, and only one tap-based app should run per machine.
-- OSDUIHelper is private; a fallback panel is cheap.
 
 ## Critical files
 

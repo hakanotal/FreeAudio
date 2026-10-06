@@ -144,6 +144,9 @@ final class SpikeEngine: @unchecked Sendable {
         case rest(excluding: [AudioObjectID], excludeBundleIDs: [String], stream: UInt)
         /// S6: a muted tap with no aggregate device; nobody reads it.
         case mutedOnly(processes: [AudioObjectID])
+        /// Measurement only: an unmuted tap of everything bound for the device (except TapLab),
+        /// played back at gain 0. Its "peak in" shows what other processes send to the device.
+        case observe(excluding: [AudioObjectID], stream: UInt)
     }
 
     let label: String
@@ -194,6 +197,9 @@ final class SpikeEngine: @unchecked Sendable {
         case .mutedOnly(let processes):
             description = CATapDescription(stereoMixdownOfProcesses: processes)
             description.muteBehavior = .muted
+        case .observe(let excluding, let stream):
+            description = CATapDescription(excludingProcesses: excluding, deviceUID: deviceUID, stream: stream)
+            description.muteBehavior = .unmuted
         }
         description.name = "TapLab \(label)"
         description.uuid = UUID()

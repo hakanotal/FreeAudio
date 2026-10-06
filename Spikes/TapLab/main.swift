@@ -97,6 +97,14 @@ final class TapLabDelegate: NSObject, NSApplicationDelegate {
             listProcesses()
             NSApp.terminate(nil)
         }
+        // `--scenario <name> [options]`: run one spike unattended and quit (see Scenarios below).
+        let args = CommandLine.arguments
+        if let i = args.firstIndex(of: "--scenario"), i + 1 < args.count {
+            Task { @MainActor in
+                await self.runScenario(args[i + 1], args: args)
+                NSApp.terminate(nil)
+            }
+        }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
@@ -360,7 +368,7 @@ final class TapLabDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: S9
 
-    private func showOSD(_ image: TapLabOSDImage, filled: CUnsignedInt) {
+    fileprivate func showOSD(_ image: TapLabOSDImage, filled: CUnsignedInt) {
         let conn = NSXPCConnection(machServiceName: "com.apple.OSDUIHelper", options: [])
         conn.remoteObjectInterface = NSXPCInterface(with: TapLabOSDProtocol.self)
         conn.resume()
@@ -375,6 +383,193 @@ final class TapLabDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func osdHalf() { showOSD(.volume, filled: 8) }
     @objc private func osdMute() { showOSD(.mute, filled: 0) }
+}
+
+// MARK: - Scenarios (unattended spike runs)
+
+extension TapLabDelegate {
+    private func pause(_ seconds: Double) async {
+        try? await Task.sleep(for: .seconds(seconds))
+    }
+
+    private func startEngine(_ engine: SpikeEngine) async -> Bool {
+        engines.append(engine)
+        previousCallbacks[ObjectIdentifier(engine)] = 0
+        let log = halLog
+        return await withCheckedContinuation { (cont: CheckedContinuation<Bool, Never>) in
+            halQueue.async {
+                do {
+                    try engine.start(log: log)
+                    cont.resume(returning: true)
+                } catch {
+                    log("[\(engine.label)] start failed: \(error.localizedDescription)")
+                    cont.resume(returning: false)
+                }
+            }
+        }
+    }
+
+    private func stopEngine(_ engine: SpikeEngine) async {
+        engines.removeAll { $0 === engine }
+        let log = halLog
+        await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+            halQueue.async {
+                engine.stop(log: log)
+                cont.resume()
+            }
+        }
+    }
+
+    /// Preflight; if never asked, request and wait (up to 2 min) for the user to answer the prompt.
+    private func ensurePermission() async -> Int32? {
+        guard var status = PrivateAPI.audioCapturePreflight() else {
+            log("permission: TCCAccessPreflight unavailable")
+            return nil
+        }
+        log("permission: preflight = \(status)")
+        if status == 2 {
+            tccRequest()
+            for _ in 0..<240 {
+                await pause(0.5)
+                status = PrivateAPI.audioCapturePreflight() ?? status
+                if status != 2 { break }
+            }
+            log("permission: preflight after request = \(status)")
+        }
+        return status
+    }
+
+    private func firstOutputStreamIndex(_ device: AudioHardwareDevice) -> UInt? {
+        let streams = (try? device.streams) ?? []
+        return streams.firstIndex(where: { (try? $0.direction) == .output }).map(UInt.init)
+    }
+
+    private func ownProcessObjects() -> [AudioObjectID] {
+        (try? AudioHardwareSystem.shared.process(for: getpid())).map { [$0.id] } ?? []
+    }
+
+    private func makeObserver(on device: AudioHardwareDevice) -> SpikeEngine? {
+        guard let uid = try? device.uid, let stream = firstOutputStreamIndex(device) else { return nil }
+        return SpikeEngine(label: "observer", kind: .observe(excluding: ownProcessObjects(), stream: stream), deviceUID: uid, gain: 0)
+    }
+
+    private func setGain(_ engine: SpikeEngine, _ value: Float) {
+        engine.setGain(value)
+        log("[\(engine.label)] gain → \(value)")
+    }
+
+    func runScenario(_ name: String, args: [String]) async {
+        func value(_ flag: String) -> String? {
+            guard let i = args.firstIndex(of: flag), i + 1 < args.count else { return nil }
+            return args[i + 1]
+        }
+        let system = AudioHardwareSystem.shared
+        log("=== scenario \(name) ===")
+        guard let device = try? system.defaultOutputDevice else { log("no default output device"); return }
+        let deviceName = (try? device.name) ?? "?"
+        let targetPID = value("--pid").flatMap { pid_t($0) }
+        let target = targetPID.flatMap { try? system.process(for: $0) }
+        if let targetPID {
+            log("target pid \(targetPID) → process object \(target.map { "\($0.id)" } ?? "none"), running output: \(target.flatMap { try? $0.isRunningOutput } ?? false)")
+        }
+
+        switch name {
+        case "devices":
+            for d in outputDevices {
+                let volumeAddress = PropertyAddress(kAudioHardwareServiceDeviceProperty_VirtualMainVolume, scope: kAudioObjectPropertyScopeOutput)
+                let hasVolume = d.hasProperty(address: volumeAddress) && ((try? d.isPropertySettable(address: volumeAddress)) ?? false)
+                log("device \(d.id) \"\((try? d.name) ?? "?")\" uid \((try? d.uid) ?? "?") transport \(transportName((try? d.transportType) ?? 0)) hwVolume \(hasVolume) rate \((try? d.nominalSampleRate) ?? 0) stereo \((try? d.preferredOutputChannelsForStereo) ?? []) streams \(((try? d.streams) ?? []).map { (try? $0.direction) == .output ? "out" : "in" })")
+            }
+            log("default output: \(deviceName); default sound effects: \((try? system.defaultSoundEffectsDevice?.name) ?? "?")")
+
+        case "s1":
+            _ = await ensurePermission()
+            guard let target, let uid = try? device.uid else { log("s1: needs --pid of a playing process"); return }
+            var observer: SpikeEngine?
+            if args.contains("--observe"), let o = makeObserver(on: device), await startEngine(o) {
+                observer = o
+                log("s1: observer baseline (tone should be visible as peak in ≈ 0.1)")
+                await pause(2.5)
+            }
+            let engine = SpikeEngine(label: "S1", kind: .app(processes: [target.id]), deviceUID: uid, gain: 0.3)
+            guard await startEngine(engine) else { return }
+            log("s1: app tap on \(deviceName) at 0.3 (observer should drop to ≈ 0 if the tap mutes the app's own playback)")
+            await pause(3.2)
+            setGain(engine, 0.1)
+            await pause(3.2)
+            setGain(engine, 1.0)
+            await pause(3.2)
+            await stopEngine(engine)
+            log("s1: app tap stopped (observer should show the tone again)")
+            await pause(2.5)
+            if let observer { await stopEngine(observer) }
+
+        case "s1idle":
+            let bundle = value("--bundle") ?? "com.apple.controlcenter"
+            guard let process = ((try? system.processes) ?? []).first(where: { ((try? $0.bundleID) ?? nil) == bundle }),
+                  let uid = try? device.uid else { log("s1idle: no process object for \(bundle)"); return }
+            log("s1idle: \(bundle) object \(process.id), running output \((try? process.isRunningOutput) ?? false)")
+            let engine = SpikeEngine(label: "S1idle", kind: .app(processes: [process.id]), deviceUID: uid, gain: 1)
+            guard await startEngine(engine) else { return }
+            await pause(2.2)
+            await stopEngine(engine)
+
+        case "s6":
+            guard let target else { log("s6: needs --pid of a playing process"); return }
+            let hold = value("--hold").flatMap(Double.init) ?? 5
+            var observer: SpikeEngine?
+            if args.contains("--observe"), let o = makeObserver(on: device), await startEngine(o) {
+                observer = o
+                log("s6: observer baseline")
+                await pause(2.5)
+            }
+            let engine = SpikeEngine(label: "S6", kind: .mutedOnly(processes: [target.id]), deviceUID: "", gain: 1)
+            guard await startEngine(engine) else { return }
+            log("s6: muted tap active for \(hold) s (the tone should be silent)")
+            await pause(hold)
+            await stopEngine(engine)
+            log("s6: muted tap destroyed (the tone should be back)")
+            await pause(3)
+            if let observer { await stopEngine(observer) }
+
+        case "s2":
+            _ = await ensurePermission()
+            guard let uid = try? device.uid, let stream = firstOutputStreamIndex(device) else { log("s2: no output stream"); return }
+            let excluded = ownProcessObjects()
+            let engine = SpikeEngine(label: "S2", kind: .rest(excluding: excluded, excludeBundleIDs: [Bundle.main.bundleIdentifier ?? "com.freeaudio.taplab"], stream: stream), deviceUID: uid, gain: 0.3)
+            log("s2: rest tap on \(deviceName) stream \(stream), excluding \(excluded)")
+            guard await startEngine(engine) else { return }
+            await pause(3.2)
+            setGain(engine, 1.0)
+            log("s2: gain 1.0, feedback check: peak in must stay at the source level, not grow")
+            await pause(4.2)
+            if let targetPID {
+                kill(targetPID, SIGTERM)
+                log("s2: stopped the source (pid \(targetPID)); peak in should fall to 0 (no recapture of our own output)")
+                await pause(3.2)
+            }
+            if let otherUID = value("--switch-to"), let other = try? system.device(forUID: otherUID) {
+                try? system.setDefaultOutputDevice(other)
+                log("s2: default output → \((try? other.name) ?? otherUID)")
+                await pause(3.2)
+                try? system.setDefaultOutputDevice(device)
+                log("s2: default output restored → \(deviceName)")
+                await pause(2.2)
+            }
+            await stopEngine(engine)
+
+        case "osd":
+            showOSD(.volume, filled: 8)
+            await pause(2.5)
+            showOSD(.mute, filled: 0)
+            await pause(3)
+
+        default:
+            log("unknown scenario \(name)")
+        }
+        log("=== scenario \(name) done ===")
+        await pause(0.3)
+    }
 }
 
 let app = NSApplication.shared
