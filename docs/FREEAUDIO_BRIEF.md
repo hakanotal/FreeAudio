@@ -6,6 +6,8 @@ This folder starts as a copy of FreeDisplay v2.2 (commit `ae8f045`) with a new i
 
 Read this file first, then [`CLAUDE.md`](../CLAUDE.md) and [`docs/LESSONS.md`](LESSONS.md).
 
+> **Update 2026-10-06:** the open questions are answered and the plan is now [`docs/ROADMAP.md`](ROADMAP.md), which wins where the two differ. Key changes: minimum macOS **27** (Apple silicon only, arm64 builds), FineTune (GPLv3) studied as a design reference only, the private responsibility and TCC preflight APIs approved, boost up to 200%, Swift Testing for pure logic, and per-app routing as the first post-MVP feature. This brief stays as background for the Core Audio approach and the style guide.
+
 ## 1. Current state of this folder
 
 What was done during preparation:
@@ -27,7 +29,7 @@ What was done during preparation:
 - **Builds:** `ARCHS=arm64 ./scripts/build-app-clt.sh` produces `build/FreeAudio.app`. The Xcode project's file list matches the sources.
 - **Docs:** FreeDisplay's architecture doc and screenshots moved to `docs/reference/` as references for patterns and visual style. `docs/LESSONS.md` is kept, because most of its Swift, SwiftUI, MenuBarExtra and build lessons apply here too.
 
-**Do not run the app yet.** It still contains all of FreeDisplay's display control: gamma tables, night mode, a brightness-key event tap and DDC. It would fight the FreeDisplay the user runs every day. Strip the display code first (Phase 0).
+~~Do not run the app yet.~~ Done in Phase 0: the display code is stripped, so the app runs next to FreeDisplay without touching displays.
 
 ## 2. Product scope
 
@@ -80,7 +82,7 @@ API names below were checked against the macOS SDK headers on the build machine 
   - `name`, `UUID`, `processes`, `mono`, `exclusive`, `mixdown`
   - `privateTap` (`isPrivate`; set it, so only FreeAudio sees the tap)
   - `muteBehavior`: `CATapUnmuted`, `CATapMuted`, or `CATapMutedWhenTapped`. Use `CATapMutedWhenTapped` so the app's normal playback is silenced while FreeAudio plays it instead.
-  - New in **macOS 26**: `bundleIDs` and `processRestoreEnabled`. A tap can then follow an app by bundle ID across restarts. Use them when available and fall back to process IDs on 14.2–15.
+  - New in **macOS 26**: `bundleIDs` and `processRestoreEnabled`. A tap can then follow an app by bundle ID across restarts. Available at the macOS 27 target; the roadmap's spike S5 decides whether to use them (never with bundle IDs shared by several apps, such as `com.apple.WebKit.GPU`).
 - `kAudioTapPropertyFormat` (`'tfmt'`) gives the tap's `AudioStreamBasicDescription`. `kAudioTapPropertyUID` gives the UID for the aggregate device.
 
 **Aggregate device**, created with `AudioHardwareCreateAggregateDevice` and destroyed with `AudioHardwareDestroyAggregateDevice`. It combines the tap (input) with the real output device. Dictionary keys:
@@ -108,13 +110,13 @@ API names below were checked against the macOS SDK headers on the build machine 
   - no allocation, no locks, no Objective-C or Swift runtime calls that can allocate, no logging, no `@MainActor` work;
   - read the gain from a preallocated `UnsafeMutablePointer<Float>` that the main thread writes (aligned word-sized stores);
   - ramp gain changes over about 30 ms per sample to avoid clicks: `coef = 1 - exp(-1 / (sampleRate * 0.030))`;
-  - `Synchronization.Atomic` needs macOS 15, so don't depend on it while the deployment target is 14.2.
+  - With the macOS 27 target, use `Synchronization.Atomic` for the shared values.
 
 ### Permissions
 
 - Add `NSAudioCaptureUsageDescription` to the Info.plist, in Turkish and English the way the app's other strings are. Xcode has no `INFOPLIST_KEY_` for it, so add it to the Info.plist template in `scripts/build-app-clt.sh` and to `project.yml` (as an `info:` plist section or an Info.plist file).
 - On first tap creation macOS shows the **"System Audio Recording Only"** permission prompt. It is managed under *System Settings → Privacy & Security → Screen & System Audio Recording*.
-- There is no public API to check or request this permission in advance. AudioCap uses private TCC calls; per `CLAUDE.md`, ask the user before adding any private API. Without it:
+- There is no public API to check or request this permission in advance. AudioCap uses private TCC calls; the user approved `TCCAccessPreflight`/`TCCAccessRequest` (2026-10-06), loaded with `dlsym`. Keep these fallbacks for when it is missing:
   - treat tap creation errors as "no permission";
   - also treat all-zero buffers while the app is playing as "no permission";
   - show a row explaining the problem, with a button that opens that settings pane.
@@ -242,7 +244,7 @@ Test on real hardware after each phase. There is no automated test suite. Build 
 - `git init` and a first commit, "Baseline: copy of FreeDisplay v2.2 with FreeAudio identity", so later diffs are reviewable.
 - Ask the user before creating the GitHub repo (expected: `hakanotal/FreeAudio`).
 - Remove the display code (section 4).
-- Raise the deployment target to **14.2** in `project.yml` and `MIN_MACOS` in `build-app-clt.sh`.
+- Raise the deployment target to **27.0** (decided 2026-10-06; originally 14.2) in `project.yml` and `MIN_MACOS` in `build-app-clt.sh`.
 - Add `NSAudioCaptureUsageDescription` and remove `NSScreenCaptureUsageDescription`.
 - Trim the bridging header. Set the menu bar symbol.
 - Update the Xcode project file list (`xcodegen generate` if it's installed; otherwise edit the pbxproj carefully, as was done for FreeDisplay v2.2).
@@ -286,17 +288,17 @@ Test on real hardware after each phase. There is no automated test suite. Build 
 - Ask the user before:
   - adding private APIs (including the TCC preflight AudioCap uses);
   - adding third-party dependencies;
-  - choosing a minimum macOS above 14.2;
+  - changing the minimum macOS (27);
   - creating or pushing to a GitHub repository.
 - Keep `CHANGELOG.md`, `docs/LESSONS.md` and a FreeAudio `docs/ARCHITECTURE.md` current as you go. Write the architecture doc when Phase 1 lands, following the reference copy's format.
 
 ## 9. Open questions for the user
 
-1. Minimum macOS: 14.2 (widest reach) or 15 (simpler concurrency, fewer tap bugs)?
-2. Boost limit: 200% (suggested) or more?
-3. After the MVP, which comes first: per-app output routing, EQ or profiles?
-4. App icon direction: an audio variant of the FreeDisplay icon?
-5. GitHub repository name and whether to publish it right away.
+1. ~~Minimum macOS~~: **macOS 27** (answered 2026-10-06).
+2. ~~Boost limit~~: **200%** (answered 2026-10-06).
+3. ~~After the MVP~~: **per-app output routing** first (answered 2026-10-06).
+4. App icon direction: an audio variant of the FreeDisplay icon? (Phase 6)
+5. GitHub repository name and whether to publish it right away. (Ask before creating it.)
 
 ## 10. References
 

@@ -1,17 +1,20 @@
 #!/bin/bash
 # Build FreeAudio.app with the Command Line Tools only (no Xcode needed).
 #
-#   ./scripts/build-app-clt.sh            # universal (arm64 + x86_64) release build
-#   ARCHS=arm64 ./scripts/build-app-clt.sh
+#   ./scripts/build-app-clt.sh            # arm64 release build (macOS 27 runs only on Apple silicon)
+#   CODESIGN_IDENTITY="FreeAudio Dev" ./scripts/build-app-clt.sh
 #
-# Output: build/FreeAudio.app (ad-hoc signed)
+# Output: build/FreeAudio.app (ad-hoc signed unless CODESIGN_IDENTITY is set)
 #
 # Notes:
 # - The CLT toolchain ships without the SwiftUIMacros plugin, so `@State` can't be expanded
 #   as a macro. The build compiles a scratch copy of the sources that uses the
 #   `SwiftUI.State` property wrapper through a typealias instead (same runtime behavior).
 #   The repository sources are never modified.
-# - Info.plist mirrors the INFOPLIST_KEY_* settings in project.yml.
+# - Info.plist mirrors the INFOPLIST_KEY_* settings and `info:` properties in project.yml.
+# - Ad-hoc signatures change on every build, so macOS forgets the System Audio Recording and
+#   Accessibility grants each time. Signing with a stable local identity (e.g. a self-signed
+#   "FreeAudio Dev" code-signing certificate) keeps them across rebuilds.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -19,8 +22,9 @@ BUILD="$ROOT/build"
 WORK="$BUILD/clt"
 APP="$BUILD/FreeAudio.app"
 SDK="$(xcrun --show-sdk-path)"
-ARCHS="${ARCHS:-arm64 x86_64}"
-MIN_MACOS="14.0"
+ARCHS="${ARCHS:-arm64}"
+MIN_MACOS="27.0"
+CODESIGN_IDENTITY="${CODESIGN_IDENTITY:--}"
 
 VERSION="$(sed -n 's/^ *MARKETING_VERSION: *"\{0,1\}\([^"]*\)"\{0,1\}$/\1/p' "$ROOT/project.yml")"
 BUILD_NUMBER="$(sed -n 's/^ *CURRENT_PROJECT_VERSION: *"\{0,1\}\([^"]*\)"\{0,1\}$/\1/p' "$ROOT/project.yml")"
@@ -44,7 +48,6 @@ for ARCH in $ARCHS; do
     -swift-version 6 -strict-concurrency=minimal \
     -module-name FreeAudio \
     -module-cache-path "$WORK/module-cache" \
-    -import-objc-header FreeAudio/FreeAudio-Bridging-Header.h \
     $(find FreeAudio -name "*.swift") \
     -o "$WORK/FreeAudio-$ARCH")
   SLICES+=("$WORK/FreeAudio-$ARCH")
@@ -69,7 +72,8 @@ iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AppIcon.icns"
 
 echo "==> Info.plist"
 COPYRIGHT="$(sed -n 's/^ *INFOPLIST_KEY_NSHumanReadableCopyright: *"\(.*\)"$/\1/p' "$ROOT/project.yml")"
-SCREEN_CAPTURE="$(sed -n 's/^ *INFOPLIST_KEY_NSScreenCaptureUsageDescription: *"\(.*\)"$/\1/p' "$ROOT/project.yml")"
+AUDIO_CAPTURE="$(sed -n 's/^ *NSAudioCaptureUsageDescription: *"\(.*\)"$/\1/p' "$ROOT/project.yml")"
+: "${AUDIO_CAPTURE:?NSAudioCaptureUsageDescription not found in project.yml}"
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -91,16 +95,16 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>NSHighResolutionCapable</key><true/>
     <key>NSPrincipalClass</key><string>NSApplication</string>
     <key>NSHumanReadableCopyright</key><string>$COPYRIGHT</string>
-    <key>NSScreenCaptureUsageDescription</key><string>$SCREEN_CAPTURE</string>
+    <key>NSAudioCaptureUsageDescription</key><string>$AUDIO_CAPTURE</string>
 </dict>
 </plist>
 PLIST
 printf 'APPL????' > "$APP/Contents/PkgInfo"
 plutil -lint "$APP/Contents/Info.plist" >/dev/null
 
-echo "==> Signing (ad-hoc)"
+echo "==> Signing (identity: $CODESIGN_IDENTITY)"
 xattr -cr "$APP"
-codesign --force --sign - --entitlements "$ROOT/FreeAudio/FreeAudio.entitlements" "$APP"
+codesign --force --sign "$CODESIGN_IDENTITY" --entitlements "$ROOT/FreeAudio/FreeAudio.entitlements" "$APP"
 codesign --verify --strict "$APP"
 
 echo "==> Built $APP"

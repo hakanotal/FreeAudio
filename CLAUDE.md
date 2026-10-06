@@ -2,23 +2,25 @@
 
 Free, open-source SoundSource alternative: a macOS menu bar app for per-app volume and mute, output device control, software volume for outputs without hardware volume (HDMI/DisplayPort), and later per-app routing, EQ and profiles. UI in Turkish and English. Sibling of [FreeDisplay](https://github.com/hakanotal/FreeDisplay); same know-how, same visual style.
 
-**Status:** the project was just created as a copy of FreeDisplay v2.2 with a new identity. It still contains FreeDisplay's display code. **Start with [docs/FREEAUDIO_BRIEF.md](docs/FREEAUDIO_BRIEF.md)**: scope, Core Audio process-tap approach, what to keep and remove, style guide, phased plan. Don't run the app before Phase 0 (strip display code) or it will fight the user's installed FreeDisplay.
+**Status:** Phase 0 of [docs/ROADMAP.md](docs/ROADMAP.md) (display code stripped, toolchain set up; spikes next). **Start with the roadmap**: decisions, engine design, spikes, phases with acceptance checks. [docs/FREEAUDIO_BRIEF.md](docs/FREEAUDIO_BRIEF.md) keeps the background (Core Audio process taps, style guide); where the two differ, the roadmap wins.
 
-Swift 6 + SwiftUI (`MenuBarExtra`) + Core Audio (process taps, macOS 14.2+). No third-party dependencies. App Sandbox is off.
+Swift 6 + SwiftUI (`MenuBarExtra`) + Core Audio process taps. **Minimum macOS 27, Apple silicon only (arm64).** No third-party dependencies. App Sandbox is off.
 
-- Plan and approach: [docs/FREEAUDIO_BRIEF.md](docs/FREEAUDIO_BRIEF.md)
-- Pitfalls inherited from FreeDisplay: [docs/LESSONS.md](docs/LESSONS.md)
+- Plan, decisions and engine design: [docs/ROADMAP.md](docs/ROADMAP.md)
+- Background and style guide: [docs/FREEAUDIO_BRIEF.md](docs/FREEAUDIO_BRIEF.md)
+- Pitfalls: [docs/LESSONS.md](docs/LESSONS.md)
 - FreeDisplay's architecture and screenshots (patterns and visual reference): [docs/reference/](docs/reference/)
 
 ## Build
 
 ```bash
-ARCHS=arm64 ./scripts/build-app-clt.sh   # quick local build → build/FreeAudio.app (no Xcode needed)
-./scripts/build-dmg.sh                   # universal release app + DMG in build/
-xcodegen generate                        # after editing project.yml or adding files, if XcodeGen is installed
+./scripts/build-app-clt.sh   # local build → build/FreeAudio.app (no Xcode needed)
+./scripts/test.sh            # Swift Testing unit tests for FreeAudio/Core (swift test on the CLT)
+./scripts/build-dmg.sh       # release app + DMG in build/
+xcodegen generate            # after adding/removing files or editing project.yml (XcodeGen is installed)
 ```
 
-There is no automated test suite. Per-app audio, device switching and volume keys must be checked on real hardware (built-in speakers, Bluetooth headphones, an HDMI/DisplayPort monitor).
+Unit tests cover pure logic only (`FreeAudio/Core`, compiled into both the app and `Package.swift`). Per-app audio, device switching and volume keys must be checked on real hardware (built-in speakers, AirPods, the Dell over USB-C, a USB DAC). Ad-hoc signatures change every build, so macOS re-asks for System Audio Recording and Accessibility after each rebuild unless `CODESIGN_IDENTITY` names a stable local signing identity.
 
 ## Language
 
@@ -27,25 +29,32 @@ There is no automated test suite. Per-app audio, device switching and volume key
 
 ## Rules
 
+**Reference code license**
+- [FineTune](https://github.com/ronitsingh10/FineTune) is **GPLv3**; FreeAudio is MIT. It was studied as a design reference (summary in the roadmap's "What FineTune teaches"). Never copy its code or test fixtures, and never translate a file line by line. Write FreeAudio code from the roadmap, Apple's headers and FreeDisplay's patterns.
+
 **Structure**
 - Views never call Core Audio, CoreGraphics or IOKit directly; go through a Service.
 - Services are `@MainActor final class … : ObservableObject, @unchecked Sendable` singletons (`static let shared`). The main manager is owned by `AppDelegate`.
+- Pure, testable logic goes in `FreeAudio/Core` (Foundation and Core Audio types only; no AppKit, SwiftUI or services) with tests in `Tests/FreeAudioCoreTests`.
 - Row components with local state (`isHovered`, `isLoading`) are separate `struct`s named `XxxRow`, not `@ViewBuilder` functions.
 - UserDefaults keys always use the `fa.` prefix.
 - Persist per-app settings by bundle ID and per-device settings by device UID. Never key saved state by PID or `AudioObjectID`; they change every launch.
 - Concurrency errors: use `@MainActor` or `@unchecked Sendable` (`SWIFT_STRICT_CONCURRENCY: minimal`). Mark completion handlers and callbacks that run off-main `@Sendable` (Swift 6 traps otherwise).
 
 **Audio**
-- IOProc blocks are real-time code: no allocation, locks, logging, Objective-C/Swift runtime calls that can allocate, or `@MainActor` hops. Share state through preallocated memory; ramp gain changes (~30 ms).
+- IOProcs are C functions (`AudioDeviceCreateIOProcID` + client-data pointer), not blocks. They are real-time code: no allocation, locks, logging, ARC, Objective-C/Swift runtime calls that can allocate, or `@MainActor` hops. Share state through preallocated memory and `Atomic`; ramp gain changes (~30 ms).
 - Only tap apps whose settings differ from default; destroy taps and aggregate devices when no longer needed and on quit. Taps and aggregate devices are always private.
 - Never tap FreeAudio's own process.
-- Rebuild taps on default-output change, sample-rate/format change and after wake.
-- Wrap potentially blocking HAL setup/teardown off the main thread with a timeout (pattern: `CGHelpers.runWithTimeout`).
+- Rebuild taps on default-output change, sample-rate/format change, coreaudiod restart and after wake.
+- HAL setup/teardown runs on the serial HAL queue with a timeout (see the roadmap's engine design), never on the main thread.
 
-**Ask the user first** before adding private APIs (including TCC permission preflight), anything that needs SIP off or special permissions beyond System Audio Recording and Accessibility, third-party dependencies, a minimum macOS above 14.2, architecture changes, or creating/pushing a GitHub repository.
+**Approved by the user (2026-10-06):** minimum macOS 27; the private APIs `responsibility_get_pid_responsible_for_pid` and `TCCAccessPreflight`/`TCCAccessRequest` (loaded with `dlsym`, with a public fallback); XcodeGen as a dev-only tool.
+
+**Ask the user first** before adding any other private API, anything that needs SIP off or special permissions beyond System Audio Recording and Accessibility, third-party dependencies, changing the minimum macOS, architecture changes beyond the roadmap, or creating/pushing a GitHub repository.
 
 ## Keeping docs current
 
 - Added/removed a Service or changed a key flow → update `docs/ARCHITECTURE.md` (create it when Phase 1 lands; follow `docs/reference/FreeDisplay-ARCHITECTURE.md`).
 - Hit a non-obvious pitfall → add one line to `docs/LESSONS.md`.
 - User-visible change → add it to `CHANGELOG.md`.
+- A roadmap decision changes → update `docs/ROADMAP.md`.

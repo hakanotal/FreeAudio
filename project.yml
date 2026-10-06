@@ -2,17 +2,23 @@ name: FreeAudio
 options:
   bundleIdPrefix: com.freeaudio
   deploymentTarget:
-    macOS: "14.0"
+    macOS: "27.0"
 
 targets:
   FreeAudio:
     type: application
     platform: macOS
-    deploymentTarget: "14.0"
+    deploymentTarget: "27.0"
     sources:
       - path: FreeAudio
         excludes:
           - "**/*.md"
+    info:
+      path: FreeAudio/Info.plist
+      properties:
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        NSAudioCaptureUsageDescription: "FreeAudio, uygulamaların ses düzeyini ayarlamak için sistem sesine erişir. / FreeAudio needs system audio access to control each app's volume."
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.freeaudio.app
@@ -26,7 +32,6 @@ targets:
         CODE_SIGNING_REQUIRED: YES
         CODE_SIGN_IDENTITY: "-"
         SWIFT_STRICT_CONCURRENCY: minimal
-        SWIFT_OBJC_BRIDGING_HEADER: FreeAudio/FreeAudio-Bridging-Header.h
         GENERATE_INFOPLIST_FILE: YES
-        INFOPLIST_KEY_NSScreenCaptureUsageDescription: "FreeAudio, ekranların canlı önizlemesini göstermek için ekran kaydı iznine ihtiyaç duyar."
+        ARCHS: arm64
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon

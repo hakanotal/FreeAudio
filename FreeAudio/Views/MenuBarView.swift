@@ -63,144 +63,16 @@ struct ExpandableRow: View {
 }
 
 struct MenuBarView: View {
-    @EnvironmentObject var displayManager: DisplayManager
     @ObservedObject private var updateService = UpdateService.shared
     @ObservedObject private var settings = SettingsService.shared
-    @ObservedObject private var virtualDisplayService = VirtualDisplayService.shared
-    @ObservedObject private var nightMode = NightModeService.shared
-    @State private var expandedDisplayIDs: Set<CGDirectDisplayID> = []
-    @State private var showArrangement: Bool = false
-    @State private var showVirtualDisplays: Bool = false
-    @State private var showAutoBrightness: Bool = false
-    @State private var showNightMode: Bool = false
     @State private var showSettings: Bool = false
     @State private var quitHovered = false
     @State private var contentHeight: CGFloat = 0
-
-    private var visibleDisplays: [DisplayInfo] {
-        displayManager.displays.filter { !virtualDisplayService.isVirtualDisplay($0.displayID) }
-    }
 
     var body: some View {
         VStack(spacing: 0) {
         ScrollView(.vertical, showsIndicators: false) {
             VStack(alignment: .leading, spacing: 0) {
-                // Display list
-                ForEach(visibleDisplays) { display in
-                    VStack(spacing: 0) {
-                        DisplayRowView(
-                            display: display,
-                            isExpanded: expandedDisplayIDs.contains(display.displayID),
-                            onToggleExpand: {
-                                if expandedDisplayIDs.contains(display.displayID) {
-                                    expandedDisplayIDs.remove(display.displayID)
-                                } else {
-                                    expandedDisplayIDs.insert(display.displayID)
-                                }
-                            }
-                        )
-
-                        if expandedDisplayIDs.contains(display.displayID) {
-                            DisplayDetailView(display: display)
-                        }
-                    }
-                }
-
-                // Preset list
-                Divider()
-                    .opacity(0.3)
-                    .padding(.vertical, 2)
-
-                PresetListView()
-
-                // Display arrangement section
-                if visibleDisplays.count > 1 {
-                    Divider()
-                        .opacity(0.3)
-                        .padding(.vertical, 2)
-
-                    ExpandableRow(
-                        icon: "rectangle.3.offgrid",
-                        iconColor: .blue,
-                        label: L("Ekranları Düzenle", "Arrange Displays"),
-                        isExpanded: $showArrangement
-                    )
-
-                    if showArrangement {
-                        ArrangementView()
-                            .environmentObject(displayManager)
-                            .transition(.opacity.combined(with: .move(edge: .top)))
-                    }
-                }
-
-                Divider()
-                    .opacity(0.3)
-                    .padding(.vertical, 2)
-
-                // Combined brightness control
-                if settings.showCombinedBrightness {
-                    CombinedBrightnessView(displays: displayManager.displays)
-                    Divider()
-                        .opacity(0.3)
-                        .padding(.vertical, 2)
-                }
-
-                // Tools section header
-                Text(L("Araçlar", "Tools"))
-                    .font(.caption2)
-                    .fontWeight(.semibold)
-                    .foregroundColor(.secondary)
-                    .padding(.horizontal, 12)
-                    .padding(.top, 8)
-                    .padding(.bottom, 2)
-
-                // Virtual display tool entry
-                ExpandableRow(
-                    icon: "display.2",
-                    iconColor: .blue,
-                    label: L("Sanal Ekranlar", "Virtual Displays"),
-                    isExpanded: $showVirtualDisplays
-                )
-
-                if showVirtualDisplays {
-                    VirtualDisplayView()
-                        .padding(.leading, 8)
-                        .transition(.opacity.combined(with: .move(edge: .top)))
-                }
-
-                // Auto brightness entry
-                ExpandableRow(
-                    icon: "sun.and.horizon.fill",
-                    iconColor: .orange,
-                    label: L("Otomatik Parlaklık", "Auto Brightness"),
-                    isExpanded: $showAutoBrightness
-                )
-
-                if showAutoBrightness {
-                    AutoBrightnessView()
-                        .padding(.leading, 8)
-                        .transition(.opacity.combined(with: .move(edge: .top)))
-                }
-
-                // Night mode (blue light filter)
-                ExpandableRow(
-                    icon: "moon.fill",
-                    iconColor: nightMode.isActive ? .indigo : .gray,
-                    label: L("Gece Modu", "Night Mode"),
-                    subtitle: NightModeView.subtitle(for: nightMode),
-                    isExpanded: $showNightMode
-                )
-
-                if showNightMode {
-                    NightModeView()
-                        .padding(.leading, 8)
-                        .transition(.opacity.combined(with: .move(edge: .top)))
-                }
-
-                Divider()
-                    .opacity(0.3)
-                    .padding(.vertical, 2)
-
                 // Settings section
                 ExpandableRow(
                     icon: "gearshape.fill",
@@ -288,11 +160,8 @@ struct MenuBarView: View {
         // (content centered with gaps). Height is capped by the ScrollView frame above.
         .frame(width: 340)
         .padding(.vertical, 8)
-        .topResizeAnchor()
-        .onReceive(displayManager.$displays) { newDisplays in
-            let validIDs = Set(newDisplays.map { $0.displayID })
-            expandedDisplayIDs = expandedDisplayIDs.intersection(validIDs)
-        }
+        // Keeps the panel pinned under the menu bar while it grows/shrinks.
+        .windowResizeAnchor(.top)
         .task {
             if settings.checkUpdatesOnLaunch {
                 await updateService.checkForUpdates()
@@ -301,22 +170,10 @@ struct MenuBarView: View {
     }
 }
 
-private extension View {
-    /// Keeps the panel pinned under the menu bar while it grows/shrinks (macOS 26+).
-    @ViewBuilder func topResizeAnchor() -> some View {
-        if #available(macOS 26.0, *) {
-            windowResizeAnchor(.top)
-        } else {
-            self
-        }
-    }
-}
-
 // MARK: - SettingsView (embedded in MenuBarView)
 
 struct SettingsView: View {
     @ObservedObject private var settings = SettingsService.shared
-    @EnvironmentObject var displayManager: DisplayManager
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -329,10 +186,7 @@ struct SettingsView: View {
                 Spacer(minLength: 8)
                 Picker("", selection: Binding(
                     get: { LanguageStore.shared.language },
-                    set: { newValue in
-                        LanguageStore.shared.language = newValue
-                        displayManager.relocalizeDisplayNames()
-                    }
+                    set: { LanguageStore.shared.language = $0 }
                 )) {
                     Text(verbatim: "Türkçe").tag(AppLanguage.tr)
                     Text(verbatim: "English").tag(AppLanguage.en)
@@ -395,21 +249,6 @@ struct SettingsView: View {
                 }
             }
 
-            // Show combined brightness
-            Toggle(isOn: $settings.showCombinedBrightness) {
-                HStack(spacing: 6) {
-                    MenuItemIcon(systemName: "sun.min.fill", color: .yellow)
-                        .accessibilityHidden(true)
-                    Text(L("Birleşik parlaklığı göster", "Show combined brightness"))
-                        .font(.body)
-                    Spacer(minLength: 8)
-                }
-            }
-            .toggleStyle(.switch)
-            .controlSize(.small)
-            .padding(.horizontal, 12)
-            .help(L("Menüde tüm ekranlar için tek bir parlaklık kaydırıcısı göster", "Show a single brightness slider for all displays in the menu"))
-
             // Check for updates on launch
             Toggle(isOn: $settings.checkUpdatesOnLaunch) {
                 HStack(spacing: 6) {
@@ -426,82 +265,5 @@ struct SettingsView: View {
             .help(L("Her açılışta yeni sürüm olup olmadığını otomatik denetle", "Automatically check for a new version on every launch"))
         }
         .padding(.vertical, 6)
-    }
-}
-
-// MARK: - DisplayRowView
-
-struct DisplayRowView: View {
-    @ObservedObject var display: DisplayInfo
-    @EnvironmentObject var displayManager: DisplayManager
-    @State private var isHovered: Bool = false
-
-    let isExpanded: Bool
-    let onToggleExpand: () -> Void
-
-    var body: some View {
-        HStack(spacing: 0) {
-            HStack {
-                Image(systemName: "chevron.right")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                    .frame(width: 16)
-                    .rotationEffect(Angle(degrees: isExpanded ? 90 : 0))
-                    .animation(.easeInOut(duration: 0.2), value: isExpanded)
-                    .accessibilityHidden(true)
-
-                MenuItemIcon(systemName: display.isBuiltin ? "laptopcomputer" : "display", color: .blue)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(display.name)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                    if let mode = display.currentDisplayMode {
-                        Text(mode.resolutionString)
-                            .font(.caption2)
-                            .foregroundColor(.secondary)
-                            .lineLimit(1)
-                    }
-                }
-                if display.isMain {
-                    Text(L("Ana", "Main"))
-                        .font(.caption2)
-                        .foregroundColor(.blue)
-                        .padding(.horizontal, 4)
-                        .padding(.vertical, 1)
-                        .background(Color.blue.opacity(0.12))
-                        .cornerRadius(3)
-                }
-                Spacer()
-            }
-            .contentShape(Rectangle())
-            .onTapGesture { onToggleExpand() }
-            .help(L("Ekran kontrol panelini genişlet", "Expand display controls"))
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
-        .background(Color.primary.opacity(isHovered ? 0.06 : 0))
-        .animation(.easeInOut(duration: 0.15), value: isHovered)
-        .onHover { isHovered = $0 }
-        .contextMenu {
-            Button {
-                if let url = URL(string: "x-apple.systempreferences:com.apple.Displays-Settings") {
-                    NSWorkspace.shared.open(url)
-                }
-            } label: {
-                Label(L("Sistem Ayarları'nda Aç", "Open in System Settings"), systemImage: "display")
-            }
-
-            Divider()
-
-            Button {
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(display.name, forType: .string)
-            } label: {
-                Label(L("Ekran Adını Kopyala", "Copy Display Name"), systemImage: "doc.on.doc")
-            }
-        }
-        .accessibilityLabel(L("Ekran: \(display.name)\(display.isMain ? ", ana ekran" : "")\(isExpanded ? ", genişletildi" : ", daraltıldı")", "Display: \(display.name)\(display.isMain ? ", main display" : "")\(isExpanded ? ", expanded" : ", collapsed")"))
-        .accessibilityHint(L("Kontrol panelini genişletmek için tıklayın", "Click to expand the control panel"))
-        .accessibilityAddTraits(.isButton)
     }
 }

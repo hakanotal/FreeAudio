@@ -1,7 +1,7 @@
 #!/bin/bash
 # Build a release FreeAudio.app and package it as build/FreeAudio-<version>.dmg.
 # Uses Xcode when available; otherwise falls back to the Command Line Tools build
-# (scripts/build-app-clt.sh). Both produce a universal (arm64 + x86_64), ad-hoc signed app.
+# (scripts/build-app-clt.sh). Both produce an arm64 (macOS 27 is Apple silicon only), ad-hoc signed app.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -17,7 +17,7 @@ if xcodebuild -version >/dev/null 2>&1; then
   # Skip Xcode's codesign; we sign manually after stripping xattrs
   xcodebuild -scheme "$APP_NAME" -configuration Release \
     -derivedDataPath "$BUILD_DIR/DerivedData" \
-    ARCHS="arm64 x86_64" ONLY_ACTIVE_ARCH=NO \
+    ARCHS="arm64" ONLY_ACTIVE_ARCH=NO \
     CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO \
     clean build 2>&1 | tail -20
   APP_PATH="$BUILD_DIR/DerivedData/Build/Products/Release/${APP_NAME}.app"

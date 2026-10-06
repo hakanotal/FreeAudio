@@ -14,7 +14,7 @@ FreeAudio is the sibling of [FreeDisplay](https://github.com/hakanotal/FreeDispl
 
 ## Status
 
-Early development; there is no release yet. The plan, technical approach and style guide are in [docs/FREEAUDIO_BRIEF.md](docs/FREEAUDIO_BRIEF.md).
+Early development; there is no release yet. The plan is in [docs/ROADMAP.md](docs/ROADMAP.md); the technical background and style guide are in [docs/FREEAUDIO_BRIEF.md](docs/FREEAUDIO_BRIEF.md).
 
 Planned for the first release:
 
@@ -23,7 +23,7 @@ Planned for the first release:
 - Software volume and volume keys for HDMI/DisplayPort outputs
 - Launch at login, Turkish/English UI, update check
 
-Requires macOS 14.2 or later (Core Audio process taps).
+Requires macOS 27 or later on Apple silicon.
 
 ## Build from source
 
@@ -33,7 +33,7 @@ cd FreeAudio
 ./scripts/build-dmg.sh   # → build/FreeAudio.app and build/FreeAudio-<version>.dmg
 ```
 
-Xcode is optional: without it the script builds with the Command Line Tools (`xcode-select --install`).
+Xcode is optional: without it the script builds with the Command Line Tools (`xcode-select --install`). Run the unit tests with `./scripts/test.sh`.
 
 ## License
 
