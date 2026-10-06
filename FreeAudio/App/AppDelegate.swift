@@ -14,6 +14,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // `FreeAudio --dump-audio`: print a read-only diagnostics snapshot and quit. Runs next to
+        // a normal instance, so it skips the single-instance check and the launch agent.
+        if CommandLine.arguments.contains("--dump-audio") {
+            audioManager.start()
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(500))
+                print(self.audioManager.diagnostics())
+                NSApp.terminate(nil)
+            }
+            return
+        }
+
         // Prevent duplicate launches: exit if another instance is already running
         let otherInstances = NSWorkspace.shared.runningApplications.filter {
             $0.bundleIdentifier == Bundle.main.bundleIdentifier &&
@@ -49,15 +61,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         SettingsService.shared.launchAtLogin = LaunchService.shared.isEnabled
 
         audioManager.start()
-
-        // `FreeAudio --dump-audio`: print a diagnostics snapshot and quit.
-        if CommandLine.arguments.contains("--dump-audio") {
-            Task { @MainActor in
-                try? await Task.sleep(for: .milliseconds(500))
-                print(self.audioManager.diagnostics())
-                NSApp.terminate(nil)
-            }
-        }
     }
 
     private static func waitForTermination(of apps: [NSRunningApplication], timeout: TimeInterval) async {
