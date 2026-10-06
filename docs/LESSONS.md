@@ -79,4 +79,6 @@ Hard-won constraints. Each one cost real debugging time; don't relearn them.
 - Swift 6 singletons: `@MainActor` + `@unchecked Sendable`, with `SWIFT_STRICT_CONCURRENCY: minimal`.
 - `deinit` is nonisolated. Properties it touches need `nonisolated(unsafe)`.
 - The Command Line Tools have no SwiftUI macro plugin (`build-app-clt.sh` shims `@State`), and keep the Swift Testing macro plugin in `usr/lib/swift/host/plugins/testing`, which `swift test` doesn't search. Run tests through `./scripts/test.sh`, which adds `-plugin-path`.
+- `hdiutil create -volname … -format …` prints a deprecation warning on macOS 27 (use `diskutil image create`); `build-dmg.sh` still works with it for v1.0.
+- The release build (`build-dmg.sh`, ad-hoc) overwrites `build/FreeAudio.app`; rebuild with `build-app-clt.sh` afterwards so the local copy is dev-signed again and keeps its permissions.
 - `import IOKit` doesn't include I2C/graphics. Add `import IOKit.i2c` / `import IOKit.graphics`.
