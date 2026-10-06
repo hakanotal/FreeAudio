@@ -1,6 +1,23 @@
 import CoreAudio
+import Darwin
 import Foundation
 import Synchronization
+
+// MARK: - Host time
+
+enum HostTime {
+    private static let ticksPerSecond: Double = {
+        var info = mach_timebase_info_data_t()
+        mach_timebase_info(&info)
+        return 1_000_000_000 * Double(info.denom) / Double(info.numer)
+    }()
+
+    static var now: UInt64 { mach_absolute_time() }
+    static func ticks(_ seconds: Double) -> UInt64 { UInt64(seconds * ticksPerSecond) }
+    static func seconds(_ ticks: UInt64) -> Double { Double(ticks) / ticksPerSecond }
+    static func ms(_ ticks: UInt64) -> Double { seconds(ticks) * 1000 }
+    static var ticksPerSecondValue: Double { ticksPerSecond }
+}
 
 // MARK: - Real-time state
 
@@ -16,9 +33,25 @@ struct RTState: ~Copyable {
     let peakIn = Atomic<UInt32>(0)
     let peakOut = Atomic<UInt32>(0)
     let layoutCaptured = Atomic<Bool>(false)
+    /// Longest interval between two callbacks (host ticks); the main thread resets it.
+    let maxGap = Atomic<UInt64>(0)
+
+    // Scheduled linear ramp in host time (crossfades). Duration 0 = off (one-pole ramp instead).
+    let rampFrom = Atomic<UInt32>(0)
+    let rampTo = Atomic<UInt32>(0)
+    let rampStart = Atomic<UInt64>(0)
+    let rampDuration = Atomic<UInt64>(0)
+
+    // Gain history: IOProc appends (output host time, gain at buffer start); main reads after.
+    let historyCount = Atomic<Int>(0)
+    var historyHost: UnsafeMutablePointer<UInt64>?
+    var historyGain: UnsafeMutablePointer<Float>?
+    var historyCapacity = 0
 
     var currentGain: Float = 1
     var rampCoefficient: Float = 0.0007
+    var ticksPerFrame: Double = 0
+    var lastCallbackHost: UInt64 = 0
     var stereoLeft = 0
     var stereoRight = 1
 
@@ -48,8 +81,14 @@ func tapLabIOProc(
     let input = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: inputData))
     let output = UnsafeMutableAudioBufferListPointer(outputData)
 
+    let nowHost = now.pointee.mHostTime
     rt.pointee.callbacks.add(1, ordering: .relaxed)
-    rt.pointee.lastHostTime.store(now.pointee.mHostTime, ordering: .relaxed)
+    rt.pointee.lastHostTime.store(nowHost, ordering: .relaxed)
+    if rt.pointee.lastCallbackHost != 0, nowHost > rt.pointee.lastCallbackHost {
+        let gap = nowHost - rt.pointee.lastCallbackHost
+        if gap > rt.pointee.maxGap.load(ordering: .relaxed) { rt.pointee.maxGap.store(gap, ordering: .relaxed) }
+    }
+    rt.pointee.lastCallbackHost = nowHost
 
     if !rt.pointee.layoutCaptured.load(ordering: .relaxed) {
         rt.pointee.inBufferCount = UInt32(input.count)
@@ -65,9 +104,25 @@ func tapLabIOProc(
         rt.pointee.layoutCaptured.store(true, ordering: .releasing)
     }
 
+    // Gain source: a scheduled host-time ramp if one is set, else the one-pole ramp to the target.
+    let outHost = outputTime.pointee.mHostTime
+    let rampDuration = rt.pointee.rampDuration.load(ordering: .acquiring)
+    let scheduled = rampDuration > 0 && outHost > 0
+    let rampStart = Double(rt.pointee.rampStart.load(ordering: .relaxed))
+    let rampFrom = Float(bitPattern: rt.pointee.rampFrom.load(ordering: .relaxed))
+    let rampTo = Float(bitPattern: rt.pointee.rampTo.load(ordering: .relaxed))
+    let ticksPerFrame = rt.pointee.ticksPerFrame
     let target = Float(bitPattern: rt.pointee.targetGain.load(ordering: .relaxed))
     let coefficient = rt.pointee.rampCoefficient
-    var gain = rt.pointee.currentGain
+
+    func scheduledGain(frame: Int) -> Float {
+        let t = Double(outHost) + Double(frame) * ticksPerFrame
+        let p = Float(min(max((t - rampStart) / Double(rampDuration), 0), 1))
+        return rampFrom + (rampTo - rampFrom) * p
+    }
+
+    var gain = scheduled ? scheduledGain(frame: 0) : rt.pointee.currentGain
+    let gainAtStart = gain
     var peakIn: Float = 0
     var peakOut: Float = 0
 
@@ -91,7 +146,11 @@ func tapLabIOProc(
         for i in 0..<outSamples { out[i] = 0 }
         var frameGain = gain
         for frame in 0..<frames {
-            frameGain += (target - frameGain) * coefficient
+            if scheduled {
+                frameGain = scheduledGain(frame: frame)
+            } else {
+                frameGain += (target - frameGain) * coefficient
+            }
             let inBase = frame * inChannels
             let outBase = frame * outChannels
             for c in 0..<inChannels {
@@ -122,6 +181,13 @@ func tapLabIOProc(
     }
     rt.pointee.currentGain = gain
 
+    let index = rt.pointee.historyCount.load(ordering: .relaxed)
+    if index < rt.pointee.historyCapacity, let hosts = rt.pointee.historyHost, let gains = rt.pointee.historyGain {
+        hosts[index] = outHost
+        gains[index] = gainAtStart
+        rt.pointee.historyCount.store(index + 1, ordering: .releasing)
+    }
+
     if peakIn > 0 { rt.pointee.nonZeroCallbacks.add(1, ordering: .relaxed) }
     if peakIn > Float(bitPattern: rt.pointee.peakIn.load(ordering: .relaxed)) {
         rt.pointee.peakIn.store(peakIn.bitPattern, ordering: .relaxed)
@@ -135,14 +201,15 @@ func tapLabIOProc(
 // MARK: - Engine
 
 /// One tap, optionally wrapped in a private aggregate device with an IOProc.
-/// `start`/`stop` must run on the HAL queue.
+/// `start`, `stop` and `updateProcesses` must run on the HAL queue.
 final class SpikeEngine: @unchecked Sendable {
     enum Kind {
-        /// S1: per-app tap (stereo mixdown of the given processes), muted while tapped.
-        case app(processes: [AudioObjectID])
-        /// S2: device-scoped "rest" tap: everything bound for the device except the given processes.
+        /// Per-app tap (stereo mixdown of the given processes), muted while tapped. `bundleIDs`
+        /// and `restore` exercise the macOS 26 follow-by-bundle-ID properties (S5).
+        case app(processes: [AudioObjectID], bundleIDs: [String] = [], restore: Bool = false)
+        /// Device-scoped "rest" tap: everything bound for the device except the given processes.
         case rest(excluding: [AudioObjectID], excludeBundleIDs: [String], stream: UInt)
-        /// S6: a muted tap with no aggregate device; nobody reads it.
+        /// A muted tap with no aggregate device; nobody reads it (S6).
         case mutedOnly(processes: [AudioObjectID])
         /// Measurement only: an unmuted tap of everything bound for the device (except TapLab),
         /// played back at gain 0. Its "peak in" shows what other processes send to the device.
@@ -153,6 +220,9 @@ final class SpikeEngine: @unchecked Sendable {
     let kind: Kind
     let deviceUID: String
     let rt: UnsafeMutablePointer<RTState>
+    private static let historyCapacity = 16_384
+    private let historyHost: UnsafeMutablePointer<UInt64>
+    private let historyGain: UnsafeMutablePointer<Float>
 
     private(set) var tap: AudioHardwareTap?
     private(set) var aggregate: AudioHardwareAggregateDevice?
@@ -162,19 +232,60 @@ final class SpikeEngine: @unchecked Sendable {
         self.label = label
         self.kind = kind
         self.deviceUID = deviceUID
+        historyHost = .allocate(capacity: Self.historyCapacity)
+        historyGain = .allocate(capacity: Self.historyCapacity)
         rt = .allocate(capacity: 1)
         rt.initialize(to: RTState())
         rt.pointee.targetGain.store(gain.bitPattern, ordering: .relaxed)
         rt.pointee.currentGain = gain
+        rt.pointee.historyHost = historyHost
+        rt.pointee.historyGain = historyGain
+        rt.pointee.historyCapacity = Self.historyCapacity
     }
 
     deinit {
         rt.deinitialize(count: 1)
         rt.deallocate()
+        historyHost.deallocate()
+        historyGain.deallocate()
     }
 
+    var callbackCount: UInt64 { rt.pointee.callbacks.load(ordering: .relaxed) }
+
     func setGain(_ gain: Float) {
+        rt.pointee.rampDuration.store(0, ordering: .releasing)
         rt.pointee.targetGain.store(gain.bitPattern, ordering: .relaxed)
+    }
+
+    /// Linear gain ramp scheduled in host time, evaluated per frame from the output timestamp.
+    func scheduleRamp(from: Float, to: Float, startHost: UInt64, seconds: Double) {
+        rt.pointee.rampDuration.store(0, ordering: .releasing)
+        rt.pointee.targetGain.store(to.bitPattern, ordering: .relaxed)
+        rt.pointee.rampFrom.store(from.bitPattern, ordering: .relaxed)
+        rt.pointee.rampTo.store(to.bitPattern, ordering: .relaxed)
+        rt.pointee.rampStart.store(startHost, ordering: .relaxed)
+        rt.pointee.rampDuration.store(HostTime.ticks(seconds), ordering: .releasing)
+    }
+
+    /// Recorded (output host time, gain) pairs in a host-time window.
+    func history(from start: UInt64, to end: UInt64) -> [(host: UInt64, gain: Float)] {
+        let count = rt.pointee.historyCount.load(ordering: .acquiring)
+        return (0..<count).compactMap { i in
+            historyHost[i] >= start && historyHost[i] <= end ? (historyHost[i], historyGain[i]) : nil
+        }
+    }
+
+    func resetMaxGap() -> UInt64 { rt.pointee.maxGap.exchange(0, ordering: .relaxed) }
+
+    /// The tap's current process list as Core Audio reports it.
+    func tapProcesses() -> [AudioObjectID]? { (try? tap?.description)?.processes }
+
+    /// Replaces the tap's process list in place (kAudioTapPropertyDescription). HAL queue only.
+    func updateProcesses(_ processes: [AudioObjectID]) throws {
+        guard let tap else { throw NSError(domain: "TapLab", code: 4, userInfo: [NSLocalizedDescriptionKey: "no tap"]) }
+        let description = try tap.description
+        description.processes = processes
+        try tap.setDescription(description)
     }
 
     private static func ms(since start: UInt64) -> String {
@@ -187,9 +298,11 @@ final class SpikeEngine: @unchecked Sendable {
         // 1. Tap description
         let description: CATapDescription
         switch kind {
-        case .app(let processes):
+        case .app(let processes, let bundleIDs, let restore):
             description = CATapDescription(stereoMixdownOfProcesses: processes)
             description.muteBehavior = .mutedWhenTapped
+            if !bundleIDs.isEmpty { description.bundleIDs = bundleIDs }
+            if restore { description.isProcessRestoreEnabled = true }
         case .rest(let excluding, let bundleIDs, let stream):
             description = CATapDescription(excludingProcesses: excluding, deviceUID: deviceUID, stream: stream)
             if !bundleIDs.isEmpty { description.bundleIDs = bundleIDs }
@@ -212,11 +325,11 @@ final class SpikeEngine: @unchecked Sendable {
         self.tap = tap
         let tapUID = try tap.uid
         let format = try tap.format
-        log("[\(label)] tap \(tap.id) created in \(Self.ms(since: t)); uid matches description: \(tapUID == description.uuid.uuidString) (\(tapUID))")
+        log("[\(label)] tap \(tap.id) created in \(Self.ms(since: t)); uid matches description: \(tapUID == description.uuid.uuidString)")
         log("[\(label)] tap format: \(format.mSampleRate) Hz, \(format.mChannelsPerFrame) ch, flags 0x\(String(format.mFormatFlags, radix: 16)), \(format.mBitsPerChannel) bit")
 
         if case .mutedOnly = kind {
-            log("[\(label)] muted tap active (no aggregate). Switch outputs, then Stop / kill to check audio returns.")
+            log("[\(label)] muted tap active (no aggregate).")
             return
         }
 
@@ -256,18 +369,18 @@ final class SpikeEngine: @unchecked Sendable {
             if (try? aggregate.isAlive) == true { alive = true; break }
             usleep(5_000)
         }
-        log("[\(label)] aggregate alive: \(alive) after \(Self.ms(since: t)); output config: \((try? aggregate.outputStreamConfiguration.map(\.mNumberChannels)) ?? [])")
+        if !alive { log("[\(label)] aggregate NOT alive after \(Self.ms(since: t))") }
 
         // 4. Real-time state, seeded before start so the first buffer isn't at the wrong gain.
         let sampleRate = (try? aggregate.nominalSampleRate) ?? 48_000
         rt.pointee.rampCoefficient = Float(1 - exp(-1 / (sampleRate * 0.030)))
+        rt.pointee.ticksPerFrame = HostTime.ticksPerSecondValue / sampleRate
         rt.pointee.currentGain = Float(bitPattern: rt.pointee.targetGain.load(ordering: .relaxed))
         let stereo = (try? device.preferredOutputChannelsForStereo) ?? [1, 2]
         if stereo.count == 2 {
             rt.pointee.stereoLeft = max(Int(stereo[0]) - 1, 0)
             rt.pointee.stereoRight = max(Int(stereo[1]) - 1, 0)
         }
-        log("[\(label)] sample rate \(sampleRate), preferred stereo \(stereo)")
 
         // 5. IOProc + start
         var newProcID: AudioDeviceIOProcID?
@@ -278,7 +391,7 @@ final class SpikeEngine: @unchecked Sendable {
         procID = newProcID
         t = DispatchTime.now().uptimeNanoseconds
         status = AudioDeviceStart(aggregate.id, newProcID)
-        log("[\(label)] AudioDeviceStart -> \(status) in \(Self.ms(since: t))")
+        log("[\(label)] started (AudioDeviceStart -> \(status) in \(Self.ms(since: t)))")
         if status != noErr {
             throw NSError(domain: "TapLab", code: Int(status), userInfo: [NSLocalizedDescriptionKey: "AudioDeviceStart failed: \(status)"])
         }
@@ -286,35 +399,30 @@ final class SpikeEngine: @unchecked Sendable {
 
     func stop(log: (String) -> Void) {
         let system = AudioHardwareSystem.shared
+        let t = DispatchTime.now().uptimeNanoseconds
         if let aggregate, let procID {
-            var t = DispatchTime.now().uptimeNanoseconds
-            let s1 = AudioDeviceStop(aggregate.id, procID)
-            log("[\(label)] AudioDeviceStop -> \(s1) in \(Self.ms(since: t))")
-            t = DispatchTime.now().uptimeNanoseconds
-            let s2 = AudioDeviceDestroyIOProcID(aggregate.id, procID)
-            log("[\(label)] AudioDeviceDestroyIOProcID -> \(s2) in \(Self.ms(since: t))")
+            AudioDeviceStop(aggregate.id, procID)
+            AudioDeviceDestroyIOProcID(aggregate.id, procID)
         }
         procID = nil
         if let aggregate {
-            let t = DispatchTime.now().uptimeNanoseconds
-            do {
-                try system.destroyAggregateDevice(aggregate)
-                log("[\(label)] aggregate destroyed in \(Self.ms(since: t))")
-            } catch {
-                log("[\(label)] destroyAggregateDevice failed: \(error.localizedDescription)")
-            }
+            do { try system.destroyAggregateDevice(aggregate) } catch { log("[\(label)] destroyAggregateDevice failed: \(error.localizedDescription)") }
         }
         aggregate = nil
         if let tap {
-            let t = DispatchTime.now().uptimeNanoseconds
-            do {
-                try system.destroyProcessTap(tap)
-                log("[\(label)] tap destroyed in \(Self.ms(since: t))")
-            } catch {
-                log("[\(label)] destroyProcessTap failed: \(error.localizedDescription)")
-            }
+            do { try system.destroyProcessTap(tap) } catch { log("[\(label)] destroyProcessTap failed: \(error.localizedDescription)") }
         }
         tap = nil
+        log("[\(label)] stopped and destroyed in \(Self.ms(since: t))")
+    }
+
+    /// AudioDeviceStop + AudioDeviceStart on the running aggregate, so IO waits for audio again
+    /// (TapAutoStart). HAL queue only.
+    func restartIO(log: (String) -> Void) {
+        guard let aggregate, let procID else { return }
+        let stop = AudioDeviceStop(aggregate.id, procID)
+        let start = AudioDeviceStart(aggregate.id, procID)
+        log("[\(label)] IO restarted (stop \(stop), start \(start))")
     }
 
     /// One stats line; resets the peak meters.
@@ -324,12 +432,14 @@ final class SpikeEngine: @unchecked Sendable {
         previousCallbacks = callbacks
         let peakIn = Float(bitPattern: rt.pointee.peakIn.exchange(0, ordering: .relaxed))
         let peakOut = Float(bitPattern: rt.pointee.peakOut.exchange(0, ordering: .relaxed))
-        let nonZero = rt.pointee.nonZeroCallbacks.load(ordering: .relaxed)
-        var line = String(format: "[%@] callbacks/s %llu  peak in %.4f  out %.4f  non-zero callbacks %llu  gain %.3f",
-                          label, delta, peakIn, peakOut, nonZero, rt.pointee.currentGain)
+        var line = String(format: "[%@] callbacks/s %llu  peak in %.4f  out %.4f  gain %.3f",
+                          label, delta, peakIn, peakOut, rt.pointee.currentGain)
         if rt.pointee.layoutCaptured.load(ordering: .acquiring) {
-            line += "  layout in \(rt.pointee.inBufferCount)×\(rt.pointee.inChannels)ch/\(rt.pointee.inBytes)B out \(rt.pointee.outBufferCount)×\(rt.pointee.outChannels)ch/\(rt.pointee.outBytes)B"
+            line += "  layout in \(rt.pointee.inBufferCount)×\(rt.pointee.inChannels)ch out \(rt.pointee.outBufferCount)×\(rt.pointee.outChannels)ch"
         }
         return line
     }
+
+    /// Current peak since the last read, without the stats line (resets the input meter).
+    func takePeakIn() -> Float { Float(bitPattern: rt.pointee.peakIn.exchange(0, ordering: .relaxed)) }
 }

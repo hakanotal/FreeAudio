@@ -76,6 +76,8 @@ final class TapLabDelegate: NSObject, NSApplicationDelegate {
     private var previousCallbacks: [ObjectIdentifier: UInt64] = [:]
     private var statsTimer: Timer?
     private var gain: Float = 0.3
+    /// Scenarios that read the peak meters themselves pause the 1 s stats lines.
+    fileprivate var statsPaused = false
 
     private let logURL: URL = {
         let dir = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Logs/TapLab")
@@ -359,6 +361,7 @@ final class TapLabDelegate: NSObject, NSApplicationDelegate {
     @objc private func gain10() { setGain(1.0) }
 
     private func printStats() {
+        guard !statsPaused else { return }
         for engine in engines where engine.aggregate != nil {
             var previous = previousCallbacks[ObjectIdentifier(engine)] ?? 0
             log(engine.statsLine(previousCallbacks: &previous))
@@ -456,6 +459,31 @@ extension TapLabDelegate {
     private func setGain(_ engine: SpikeEngine, _ value: Float) {
         engine.setGain(value)
         log("[\(engine.label)] gain → \(value)")
+    }
+
+    /// Runs `work` on the HAL queue; returns the error description, if any.
+    fileprivate func hal(_ work: @escaping @Sendable () throws -> Void) async -> String? {
+        await withCheckedContinuation { (cont: CheckedContinuation<String?, Never>) in
+            halQueue.async {
+                do { try work(); cont.resume(returning: nil) } catch { cont.resume(returning: error.localizedDescription) }
+            }
+        }
+    }
+
+    /// `pmset -g assertions` lines that mention audio.
+    fileprivate func audioAssertions() -> String {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/pmset")
+        process.arguments = ["-g", "assertions"]
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        try? process.run()
+        process.waitUntilExit()
+        let text = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        let lines = text.split(separator: "\n").filter {
+            $0.localizedCaseInsensitiveContains("audio") || $0.contains("PreventUserIdleSystemSleep ") || $0.contains("PreventUserIdleDisplaySleep ")
+        }
+        return lines.map { "    " + $0.trimmingCharacters(in: .whitespaces) }.joined(separator: "\n")
     }
 
     func runScenario(_ name: String, args: [String]) async {
@@ -557,6 +585,207 @@ extension TapLabDelegate {
                 await pause(2.2)
             }
             await stopEngine(engine)
+
+        case "s4":
+            // In-place kAudioTapPropertyDescription update: add a second process to a running tap.
+            guard let target, let pid2 = value("--pid2").flatMap({ pid_t($0) }),
+                  let second = try? system.process(for: pid2), let uid = try? device.uid else {
+                log("s4: needs --pid and --pid2 of two playing processes"); return
+            }
+            let engine = SpikeEngine(label: "S4", kind: .app(processes: [target.id]), deviceUID: uid, gain: 0.3)
+            guard await startEngine(engine) else { return }
+            log("s4: tapping only \(target.id) (second tone \(second.id) plays at full level)")
+            await pause(2.2)
+            statsPaused = true
+            _ = engine.takePeakIn()
+            await pause(0.3)
+            let before = engine.takePeakIn()
+            _ = engine.resetMaxGap()
+            let formatBefore = (try? engine.tap?.format).map { "\($0.mSampleRate) Hz \($0.mChannelsPerFrame) ch" } ?? "?"
+            let started = HostTime.now
+            let error = await hal { try engine.updateProcesses([target.id, second.id]) }
+            let setMs = HostTime.ms(HostTime.now - started)
+            log("s4: setDescription([\(target.id), \(second.id)]) took \(String(format: "%.1f", setMs)) ms, error: \(error ?? "none"); readback \(engine.tapProcesses() ?? [])")
+            var captureMs: Double?
+            for _ in 0..<100 {
+                await pause(0.01)
+                if engine.takePeakIn() > before * 1.4 { captureMs = HostTime.ms(HostTime.now - started); break }
+            }
+            let formatAfter = (try? engine.tap?.format).map { "\($0.mSampleRate) Hz \($0.mChannelsPerFrame) ch" } ?? "?"
+            log("s4: peak before \(String(format: "%.4f", before)); second process captured after \(captureMs.map { String(format: "%.0f ms", $0) } ?? "NOT within 1 s"); longest callback gap \(String(format: "%.1f", HostTime.ms(engine.resetMaxGap()))) ms; format \(formatBefore) → \(formatAfter)")
+            statsPaused = false
+            log("s4: both tones now tapped at 0.3 (the second tone should have dropped too)")
+            await pause(2.2)
+            statsPaused = true
+            log("s4: 100 alternating updates every 60 ms")
+            var failures = 0
+            _ = engine.resetMaxGap()
+            for i in 0..<100 {
+                let set: [AudioObjectID] = i % 2 == 0 ? [target.id] : [target.id, second.id]
+                if await hal({ try engine.updateProcesses(set) }) != nil { failures += 1 }
+                await pause(0.06)
+            }
+            let finalSet = engine.tapProcesses() ?? []
+            log("s4: 100 updates, \(failures) failed; longest callback gap \(String(format: "%.1f", HostTime.ms(engine.resetMaxGap()))) ms; final readback \(finalSet); format \((try? engine.tap?.format).map { "\($0.mSampleRate) Hz \($0.mChannelsPerFrame) ch" } ?? "?")")
+            statsPaused = false
+            await pause(1.2)
+            await stopEngine(engine)
+
+        case "s5":
+            // macOS 26 bundleIDs + processRestoreEnabled with two tone-player apps.
+            _ = await ensurePermission()
+            guard let toneA = value("--tone-a"), let toneB = value("--tone-b"), let uid = try? device.uid else {
+                log("s5: needs --tone-a and --tone-b files"); return
+            }
+            let build = Bundle.main.bundleURL.deletingLastPathComponent()
+            let appA = build.appendingPathComponent("ToneA.app"), appB = build.appendingPathComponent("ToneB.app")
+            let idA = "com.freeaudio.taplab.tonea"
+            func launch(_ url: URL, _ file: String) async -> NSRunningApplication? {
+                let config = NSWorkspace.OpenConfiguration()
+                config.arguments = [file]
+                config.createsNewApplicationInstance = true
+                config.activates = false
+                return try? await NSWorkspace.shared.openApplication(at: url, configuration: config)
+            }
+            func object(_ app: NSRunningApplication?) -> AudioObjectID? {
+                app.flatMap { try? system.process(for: $0.processIdentifier) }?.id
+            }
+
+            log("s5 V1: tap ToneA by process + bundle ID with restore on")
+            let a1 = await launch(appA, toneA)
+            await pause(1.5)
+            guard let objA = object(a1) else { log("s5: ToneA has no process object"); a1?.terminate(); return }
+            let engine = SpikeEngine(label: "S5", kind: .app(processes: [objA], bundleIDs: [idA], restore: true), deviceUID: uid, gain: 0.3)
+            guard await startEngine(engine) else { a1?.terminate(); return }
+            log("s5: ToneA (object \(objA)) tapped; expect peak in ≈ 0.10. readback \(engine.tapProcesses() ?? [])")
+            await pause(2.2)
+            a1?.terminate()
+            log("s5: ToneA quit; expect peak in 0, tap still valid")
+            await pause(2.2)
+            log("s5: readback after quit \(engine.tapProcesses() ?? [])")
+            let b = await launch(appB, toneB)
+            log("s5: ToneB (other bundle ID, 0.05 tone) started; expect peak in 0 (not captured)")
+            await pause(2.2)
+            let a2 = await launch(appA, toneA)
+            log("s5: ToneA relaunched as object \(object(a2).map { "\($0)" } ?? "?"); expect peak in ≈ 0.10 if restored")
+            await pause(2.5)
+            log("s5: readback after relaunch \(engine.tapProcesses() ?? [])")
+            await stopEngine(engine)
+            a2?.terminate()
+            await pause(1)
+
+            log("s5 V2: tap by bundle ID only, created before ToneA runs (ToneB still plays)")
+            let engine2 = SpikeEngine(label: "S5b", kind: .app(processes: [], bundleIDs: [idA], restore: true), deviceUID: uid, gain: 0.3)
+            if await startEngine(engine2) {
+                await pause(1.2)
+                let a3 = await launch(appA, toneA)
+                log("s5: ToneA started as object \(object(a3).map { "\($0)" } ?? "?"); expect peak in ≈ 0.10 if bundle-ID taps pick up new processes")
+                await pause(2.5)
+                log("s5: readback \(engine2.tapProcesses() ?? [])")
+                await stopEngine(engine2)
+                a3?.terminate()
+            }
+            b?.terminate()
+
+        case "s3":
+            // Host-time crossfade handing an app between the rest tap and its own tap, then power.
+            _ = await ensurePermission()
+            guard let target, let uid = try? device.uid, let stream = firstOutputStreamIndex(device) else {
+                log("s3: needs --pid of a playing process"); return
+            }
+            let own = ownProcessObjects()
+            let deviceGain: Float = 0.5, appGain: Float = 0.3, fade = 0.05
+            let toggles = value("--toggles").flatMap(Int.init) ?? 10
+            func rest(_ label: String, excluding extra: [AudioObjectID]) -> SpikeEngine {
+                SpikeEngine(label: label, kind: .rest(excluding: own + extra, excludeBundleIDs: [Bundle.main.bundleIdentifier ?? ""], stream: stream), deviceUID: uid, gain: 0)
+            }
+            func waitForCallbacks(_ list: [SpikeEngine]) async -> Bool {
+                for _ in 0..<100 {
+                    if list.allSatisfy({ $0.callbackCount > 2 }) { return true }
+                    await pause(0.01)
+                }
+                return false
+            }
+            /// Sum of the target's gain over the engines that carry it, compared with the ideal ramp.
+            func analyze(_ step: Int, carriers: [SpikeEngine], startHost: UInt64, from: Float, to: Float) {
+                let duration = HostTime.ticks(fade)
+                let window = (startHost - HostTime.ticks(0.03), startHost + duration + HostTime.ticks(0.03))
+                let histories = carriers.map { $0.history(from: window.0, to: window.1) }
+                guard let grid = histories.first, !grid.isEmpty else { log("s3 step \(step): no history"); return }
+                let tolerance = HostTime.ticks(0.004)
+                var worst: Float = 0, unmatched = 0, exactHostMatches = 0, samples = 0
+                for (host, _) in grid {
+                    var sum: Float = 0
+                    for h in histories {
+                        guard let nearest = h.min(by: { abs(Int64(bitPattern: $0.host &- host)) < abs(Int64(bitPattern: $1.host &- host)) }),
+                              abs(Int64(bitPattern: nearest.host &- host)) <= Int64(tolerance) else { unmatched += 1; continue }
+                        if nearest.host == host { exactHostMatches += 1 }
+                        sum += nearest.gain
+                    }
+                    let p = Float(min(max(Double(Int64(bitPattern: host &- startHost)) / Double(duration), 0), 1))
+                    worst = max(worst, abs(sum - (from + (to - from) * p)))
+                    samples += 1
+                }
+                log(String(format: "s3 step %d: carried gain %.3f → %.3f over %d buffers, worst deviation %.4f, unmatched %d, identical host times %d/%d",
+                           step, from, to, samples, worst, unmatched, exactHostMatches, samples * carriers.count))
+            }
+
+            var r = rest("R0", excluding: [])
+            guard await startEngine(r) else { return }
+            r.setGain(deviceGain)
+            log("s3: rest tap at \(deviceGain); the tone alternates between \(deviceGain) (rest tap) and \(deviceGain * appGain) (own tap) every ~1 s, \(toggles * 2) handovers")
+            await pause(1.5)
+            statsPaused = true
+            var x: SpikeEngine?
+            for step in 0..<(toggles * 2) {
+                if step % 2 == 0 {
+                    let newX = SpikeEngine(label: "X\(step)", kind: .app(processes: [target.id]), deviceUID: uid, gain: 0)
+                    let newR = rest("R\(step + 1)", excluding: [target.id])
+                    // A tap whose processes are all silent gets no callbacks, so only wait for the
+                    // engine whose source is playing; host-time ramps keep the others in step.
+                    let okX = await startEngine(newX), okR = await startEngine(newR)
+                    guard okX, okR, await waitForCallbacks([newX]) else { log("s3: engines didn't start"); await stopEngine(newX); await stopEngine(newR); break }
+                    let t = HostTime.now + HostTime.ticks(0.03)
+                    r.scheduleRamp(from: deviceGain, to: 0, startHost: t, seconds: fade)
+                    newR.scheduleRamp(from: 0, to: deviceGain, startHost: t, seconds: fade)
+                    newX.scheduleRamp(from: 0, to: deviceGain * appGain, startHost: t, seconds: fade)
+                    await pause(0.15)
+                    analyze(step, carriers: [r, newX], startHost: t, from: deviceGain, to: deviceGain * appGain)
+                    await stopEngine(r)
+                    r = newR
+                    x = newX
+                } else if let currentX = x {
+                    let newR = rest("R\(step + 1)", excluding: [])
+                    guard await startEngine(newR) else { log("s3: rest tap didn't start"); break }
+                    await pause(0.03)
+                    let t = HostTime.now + HostTime.ticks(0.03)
+                    r.scheduleRamp(from: deviceGain, to: 0, startHost: t, seconds: fade)
+                    currentX.scheduleRamp(from: deviceGain * appGain, to: 0, startHost: t, seconds: fade)
+                    newR.scheduleRamp(from: 0, to: deviceGain, startHost: t, seconds: fade)
+                    await pause(0.15)
+                    analyze(step, carriers: [currentX, newR], startHost: t, from: deviceGain * appGain, to: deviceGain)
+                    await stopEngine(currentX)
+                    await stopEngine(r)
+                    r = newR
+                    x = nil
+                }
+                await pause(0.8)
+            }
+            statsPaused = false
+            if let x { await stopEngine(x) }
+
+            log("s3: power check, stopping the source; the rest tap keeps running on silence")
+            if let targetPID { kill(targetPID, SIGTERM) }
+            await pause(4)
+            log("s3: pmset with the idle rest tap running:\n" + audioAssertions())
+            let restarted = r
+            _ = await hal { restarted.restartIO(log: { print($0) }) }
+            log("s3: IO restarted on the idle rest tap (callbacks/s should drop to 0)")
+            await pause(4)
+            log("s3: pmset after the IO restart:\n" + audioAssertions())
+            await stopEngine(r)
+            await pause(3)
+            log("s3: pmset after destroying it:\n" + audioAssertions())
 
         case "osd":
             showOSD(.volume, filled: 8)
