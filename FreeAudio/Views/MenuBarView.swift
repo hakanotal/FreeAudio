@@ -73,6 +73,18 @@ struct MenuBarView: View {
         VStack(spacing: 0) {
         ScrollView(.vertical, showsIndicators: false) {
             VStack(alignment: .leading, spacing: 0) {
+                OutputDeviceSection()
+
+                Divider()
+                    .opacity(0.3)
+                    .padding(.vertical, 2)
+
+                AppListSection()
+
+                Divider()
+                    .opacity(0.3)
+                    .padding(.vertical, 2)
+
                 // Settings section
                 ExpandableRow(
                     icon: "gearshape.fill",
@@ -162,6 +174,9 @@ struct MenuBarView: View {
         .padding(.vertical, 8)
         // Keeps the panel pinned under the menu bar while it grows/shrinks.
         .windowResizeAnchor(.top)
+        // Poll the app list faster while the panel is open.
+        .onAppear { AppAudioService.shared.panelVisible = true }
+        .onDisappear { AppAudioService.shared.panelVisible = false }
         .task {
             if settings.checkUpdatesOnLaunch {
                 await updateService.checkForUpdates()

@@ -2,9 +2,14 @@ import AppKit
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    /// Owned here rather than by a view, so audio work runs even if the menu panel is never
+    /// opened (MenuBarExtra builds its content lazily).
+    let audioManager: AudioManager
+
     override init() {
         // Must run before any service reads its defaults.
         SettingsService.migrateLegacyDefaults()
+        audioManager = AudioManager()
         super.init()
     }
 
@@ -42,6 +47,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Migrate the old login item / hand a manual launch over to the launchd agent.
         LaunchService.shared.prepareAtLaunch()
         SettingsService.shared.launchAtLogin = LaunchService.shared.isEnabled
+
+        audioManager.start()
+
+        // `FreeAudio --dump-audio`: print a diagnostics snapshot and quit.
+        if CommandLine.arguments.contains("--dump-audio") {
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(500))
+                print(self.audioManager.diagnostics())
+                NSApp.terminate(nil)
+            }
+        }
     }
 
     private static func waitForTermination(of apps: [NSRunningApplication], timeout: TimeInterval) async {
