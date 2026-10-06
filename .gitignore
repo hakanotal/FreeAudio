@@ -1,0 +1,12 @@
+.DS_Store
+build/
+*.xcodeproj/xcuserdata/
+*.xcodeproj/project.xcworkspace/xcuserdata/
+DerivedData/
+.build/
+.inspiration/
+
+# Release artifacts (published on GitHub Releases, not committed)
+*.dmg
+*.dmg.sha256
+*.xcarchive

@@ -1,0 +1,250 @@
+import Foundation
+import CoreGraphics
+import IOKit
+
+@MainActor
+final class HiDPIService: @unchecked Sendable {
+    static let shared = HiDPIService()
+    private init() {}
+
+    private var refreshTask: Task<Void, Never>?
+
+    private let overridesBase = URL(fileURLWithPath: "/Library/Displays/Contents/Resources/Overrides")
+
+    // MARK: - Public API
+
+    /// Checks whether HiDPI is enabled for the given display via plist override.
+    func isHiDPIEnabled(vendor: UInt32, product: UInt32) -> Bool {
+        FileManager.default.fileExists(atPath: overridePlistURL(vendor: vendor, product: product).path)
+    }
+
+    /// Enables HiDPI for an external display via plist override and clears any opt-out.
+    /// macOS picks up the new modes when the display is reconnected.
+    /// Returns nil on success, or an error string on failure.
+    func enableHiDPI(vendor: UInt32, product: UInt32, nativeWidth: Int, nativeHeight: Int) -> String? {
+        let err = enableHiDPIPlist(vendor: vendor, product: product,
+                                   nativeWidth: nativeWidth, nativeHeight: nativeHeight)
+        if err == nil { setOptedOut(false, vendor: vendor, product: product) }
+        return err
+    }
+
+    /// Disables HiDPI for an external display by removing the plist override, and remembers
+    /// the choice so auto-enable doesn't turn it back on.
+    func disableHiDPI(vendor: UInt32, product: UInt32) -> String? {
+        let err = disableHiDPIPlist(vendor: vendor, product: product)
+        if err == nil { setOptedOut(true, vendor: vendor, product: product) }
+        return err
+    }
+
+    /// Whether DisplayManager may enable HiDPI on its own: never after the user turned it
+    /// off for this monitor, and never when it would need an admin password prompt.
+    func allowsAutoEnable(vendor: UInt32, product: UInt32) -> Bool {
+        !optedOutKeys.contains(optOutKey(vendor: vendor, product: product)) && !requiresAdmin(vendor: vendor)
+    }
+
+    /// Refreshes availableModes on the given DisplayInfo after enabling HiDPI.
+    func refreshModes(for display: DisplayInfo) {
+        refreshTask?.cancel()
+        let physicalID = display.displayID
+
+        refreshTask = Task {
+            try? await Task.sleep(nanoseconds: 500_000_000)
+            async let modes = Task.detached(priority: .userInitiated) {
+                DisplayMode.availableModes(for: physicalID)
+            }.value
+            async let current = Task.detached(priority: .userInitiated) {
+                DisplayMode.currentMode(for: physicalID)
+            }.value
+            display.availableModes = await modes
+            display.currentDisplayMode = await current
+        }
+    }
+
+    /// True until the one-time permission step has made this vendor's override folder
+    /// writable by the current user (after that, enable/disable needs no password).
+    func requiresAdmin(vendor: UInt32) -> Bool {
+        !FileManager.default.isWritableFile(atPath: overrideDir(vendor: vendor).path)
+    }
+
+    // MARK: - Opt-out
+
+    private static let optOutDefaultsKey = "fa.hidpi.optOut"
+
+    private var optedOutKeys: [String] {
+        UserDefaults.standard.stringArray(forKey: Self.optOutDefaultsKey) ?? []
+    }
+
+    private func optOutKey(vendor: UInt32, product: UInt32) -> String {
+        String(format: "%x:%x", vendor, product)
+    }
+
+    private func setOptedOut(_ optedOut: Bool, vendor: UInt32, product: UInt32) {
+        let key = optOutKey(vendor: vendor, product: product)
+        var keys = optedOutKeys.filter { $0 != key }
+        if optedOut { keys.append(key) }
+        UserDefaults.standard.set(keys, forKey: Self.optOutDefaultsKey)
+    }
+
+    // MARK: - Plist Override
+
+    private func enableHiDPIPlist(vendor: UInt32, product: UInt32,
+                                   nativeWidth: Int, nativeHeight: Int) -> String? {
+        let plistURL = overridePlistURL(vendor: vendor, product: product)
+
+        let scaledModes = generateScaledModes(nativeWidth: nativeWidth, nativeHeight: nativeHeight)
+        let plist: [String: Any] = [
+            "scale-resolutions": scaledModes
+        ]
+
+        guard let data = try? PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0) else {
+            return L("Plist verisi oluşturulamadı", "Failed to generate plist data")
+        }
+
+        if let err = ensureWritableOverrideDir(vendor: vendor) {
+            return err
+        }
+        do {
+            try data.write(to: plistURL, options: .atomic)
+        } catch {
+            return L("Ayar dosyası yazılamadı: \(error.localizedDescription)", "Failed to write override file: \(error.localizedDescription)")
+        }
+
+        // Attempt to trigger display mode re-enumeration via IOServiceRequestProbe
+        triggerDisplayReenumeration(vendor: vendor, product: product)
+
+        return nil
+    }
+
+    private func disableHiDPIPlist(vendor: UInt32, product: UInt32) -> String? {
+        let plistURL = overridePlistURL(vendor: vendor, product: product)
+        guard FileManager.default.fileExists(atPath: plistURL.path) else { return nil }
+
+        if let err = ensureWritableOverrideDir(vendor: vendor) {
+            return err
+        }
+        do {
+            try FileManager.default.removeItem(at: plistURL)
+        } catch {
+            return L("Ayar dosyası silinemedi: \(error.localizedDescription)", "Failed to remove override file: \(error.localizedDescription)")
+        }
+        return nil
+    }
+
+    // MARK: - Helpers
+
+    /// One-time permission step: /Library/Displays is root-owned, so the first enable/disable
+    /// asks for an admin password to create this vendor's override folder and hand it to the
+    /// current user. Later writes go straight to the folder without a prompt.
+    /// Trade-off: other processes running as this user can also edit this vendor's overrides.
+    private func ensureWritableOverrideDir(vendor: UInt32) -> String? {
+        guard requiresAdmin(vendor: vendor) else { return nil }
+        let dirPath = overrideDir(vendor: vendor).path
+        return executePrivilegedCommand("mkdir -p '\(dirPath)' && chown -R \(getuid()) '\(dirPath)'")
+    }
+
+    /// Executes a shell command with administrator privileges via AppleScript.
+    /// Returns nil on success, or an error message on failure.
+    private func executePrivilegedCommand(_ command: String) -> String? {
+        let script = """
+            do shell script "\(command)" with administrator privileges
+            """
+        var error: NSDictionary?
+        guard let appleScript = NSAppleScript(source: script) else {
+            return L("AppleScript oluşturulamadı", "Failed to create AppleScript")
+        }
+        appleScript.executeAndReturnError(&error)
+        if let error = error {
+            let msg = error[NSAppleScript.errorMessage] as? String ?? L("Bilinmeyen hata", "Unknown error")
+            if msg.contains("canceled") || msg.contains("Cancel") {
+                return L("Yetkilendirme kullanıcı tarafından iptal edildi", "Authorization was canceled by the user")
+            }
+            return L("Yönetici yetkilendirmesi başarısız: \(msg)", "Administrator authorization failed: \(msg)")
+        }
+        return nil
+    }
+
+    private func triggerDisplayReenumeration(vendor: UInt32, product: UInt32) {
+        var iterator: io_iterator_t = 0
+        let matching = IOServiceMatching("IODisplayConnect")
+        guard IOServiceGetMatchingServices(kIOMainPortDefault, matching, &iterator) == KERN_SUCCESS else { return }
+        defer { IOObjectRelease(iterator) }
+
+        var service = IOIteratorNext(iterator)
+        while service != 0 {
+            defer {
+                IOObjectRelease(service)
+                service = IOIteratorNext(iterator)
+            }
+
+            guard let cfDict = IODisplayCreateInfoDictionary(service, IOOptionBits(kIODisplayOnlyPreferredName))?.takeRetainedValue() else {
+                continue
+            }
+            let dict = cfDict as NSDictionary
+
+            let serviceVendor: UInt32
+            let serviceProduct: UInt32
+
+            if let v = dict["DisplayVendorID"] as? UInt32 {
+                serviceVendor = v
+            } else if let v = dict["DisplayVendorID"] as? Int {
+                serviceVendor = UInt32(bitPattern: Int32(truncatingIfNeeded: v))
+            } else { continue }
+
+            if let p = dict["DisplayProductID"] as? UInt32 {
+                serviceProduct = p
+            } else if let p = dict["DisplayProductID"] as? Int {
+                serviceProduct = UInt32(bitPattern: Int32(truncatingIfNeeded: p))
+            } else { continue }
+
+            guard serviceVendor == vendor && serviceProduct == product else { continue }
+
+            IOServiceRequestProbe(service, 0)
+            break
+        }
+    }
+
+    private func overrideDir(vendor: UInt32) -> URL {
+        overridesBase
+            .appendingPathComponent(String(format: "DisplayVendorID-%x", vendor))
+    }
+
+    private func overridePlistURL(vendor: UInt32, product: UInt32) -> URL {
+        overrideDir(vendor: vendor)
+            .appendingPathComponent(String(format: "DisplayProductID-%x", product))
+    }
+
+    private func generateScaledModes(nativeWidth: Int, nativeHeight: Int) -> [Data] {
+        // Generate HiDPI modes: each entry is 8 bytes big-endian (backingW, backingH)
+        // For a 2560×1440 display, we want:
+        //   1920×1080 HiDPI (backing 3840×2160)
+        //   1600×900  HiDPI (backing 3200×1800)
+        //   1280×720  HiDPI (backing 2560×1440)
+        //   native as HiDPI (backing 5120×2880)
+        var resolutions: [(Int, Int)] = []
+
+        // Native resolution as HiDPI (2x backing)
+        resolutions.append((nativeWidth * 2, nativeHeight * 2))
+
+        // Scaled HiDPI modes
+        let scales: [Double] = [0.75, 0.625, 0.5]
+        for scale in scales {
+            let logicalW = Int((Double(nativeWidth) * scale).rounded()) & ~1
+            let logicalH = Int((Double(nativeHeight) * scale).rounded()) & ~1
+            guard logicalW >= 800, logicalH >= 600 else { continue }
+            resolutions.append((logicalW * 2, logicalH * 2))
+        }
+
+        return resolutions.map { (backingW, backingH) in
+            var bytes = [UInt8](repeating: 0, count: 8)
+            bytes[0] = UInt8((backingW >> 24) & 0xFF)
+            bytes[1] = UInt8((backingW >> 16) & 0xFF)
+            bytes[2] = UInt8((backingW >> 8) & 0xFF)
+            bytes[3] = UInt8(backingW & 0xFF)
+            bytes[4] = UInt8((backingH >> 24) & 0xFF)
+            bytes[5] = UInt8((backingH >> 16) & 0xFF)
+            bytes[6] = UInt8((backingH >> 8) & 0xFF)
+            bytes[7] = UInt8(backingH & 0xFF)
+            return Data(bytes)
+        }
+    }
+}

@@ -1,0 +1,74 @@
+//
+//  FreeAudio-Bridging-Header.h
+//  FreeAudio
+//
+//  Private API declarations for CGVirtualDisplay and IOAVService.
+//  Property names verified against Chromium's virtual_display_mac_util.mm.
+//
+
+#ifndef FreeAudio_Bridging_Header_h
+#define FreeAudio_Bridging_Header_h
+
+#import <Foundation/Foundation.h>
+#import <CoreGraphics/CoreGraphics.h>
+
+// MARK: - CGVirtualDisplay Private API (macOS 14+)
+
+@interface CGVirtualDisplayDescriptor : NSObject
+@property (nonatomic) CGSize   sizeInMillimeters;   // physical size (width, height) in mm
+@property (nonatomic) uint32_t maxPixelsWide;       // max pixel width
+@property (nonatomic) uint32_t maxPixelsHigh;       // max pixel height
+@property (nonatomic) NSPoint  whitePoint;
+@property (nonatomic) NSPoint  redPrimary;
+@property (nonatomic) NSPoint  greenPrimary;
+@property (nonatomic) NSPoint  bluePrimary;
+@property (nonatomic) dispatch_queue_t queue;
+@property (nonatomic, copy) NSString *name;
+@property (nonatomic) uint32_t vendorID;
+@property (nonatomic) uint32_t productID;
+@property (nonatomic) uint32_t serialNum;
+@end
+
+@interface CGVirtualDisplayMode : NSObject
+- (instancetype)initWithWidth:(NSUInteger)width
+                       height:(NSUInteger)height
+                  refreshRate:(double)refreshRate;
+@property (nonatomic, readonly) NSUInteger width;
+@property (nonatomic, readonly) NSUInteger height;
+@property (nonatomic, readonly) double     refreshRate;
+@end
+
+@interface CGVirtualDisplaySettings : NSObject
+@property (nonatomic) BOOL hiDPI;
+@property (nonatomic, copy) NSArray *modes;
+@end
+
+@interface CGVirtualDisplay : NSObject
+- (instancetype)initWithDescriptor:(CGVirtualDisplayDescriptor *)descriptor;
+- (BOOL)applySettings:(CGVirtualDisplaySettings *)settings;
+@property (nonatomic, readonly) CGDirectDisplayID displayID;
+@end
+
+// MARK: - CGSConfigureDisplayMode (resolution fallback)
+
+// Real signature (CGSInternal/CGSDisplays.h): the first argument is the transaction from
+// CGBeginDisplayConfiguration, not a connection ID. Passing anything else makes CoreGraphics
+// dereference a bogus pointer.
+extern CGError CGSConfigureDisplayMode(CGDisplayConfigRef config, CGDirectDisplayID display, int modeNum);
+
+// MARK: - IOAVService Private API (Apple Silicon DDC)
+
+typedef void * IOAVServiceRef;
+extern IOAVServiceRef IOAVServiceCreateWithService(CFAllocatorRef allocator, io_service_t service);
+extern IOReturn IOAVServiceReadI2C(IOAVServiceRef service,
+                                   uint32_t chipAddress,
+                                   uint32_t offset,
+                                   void *outputBuffer,
+                                   uint32_t outputBufferSize);
+extern IOReturn IOAVServiceWriteI2C(IOAVServiceRef service,
+                                    uint32_t chipAddress,
+                                    uint32_t dataAddress,
+                                    void *inputBuffer,
+                                    uint32_t inputBufferSize);
+
+#endif /* FreeAudio_Bridging_Header_h */
