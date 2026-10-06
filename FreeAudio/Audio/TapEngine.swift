@@ -23,6 +23,8 @@ struct RealtimeState: ~Copyable {
     let lastCallbackHost = Atomic<UInt64>(0)
     /// Last callback whose input was above the gate threshold.
     let lastSoundHost = Atomic<UInt64>(0)
+    /// First callback after IO (re)started; silence is counted from here until the first sound.
+    let ioResumedHost = Atomic<UInt64>(0)
     let everHadSound = Atomic<Bool>(false)
     let peakIn = Atomic<UInt32>(0)
     let peakOut = Atomic<UInt32>(0)
@@ -62,6 +64,7 @@ func freeAudioIOProc(
     let previous = rt.pointee.previousCallbackHost
     let resumed = previous == 0 || nowHost &- previous > rt.pointee.resumeGapTicks
     rt.pointee.previousCallbackHost = nowHost
+    if resumed { rt.pointee.ioResumedHost.store(nowHost, ordering: .relaxed) }
     rt.pointee.callbacks.add(1, ordering: .relaxed)
     rt.pointee.lastCallbackHost.store(nowHost, ordering: .relaxed)
 
@@ -155,6 +158,7 @@ final class TapEngine: @unchecked Sendable {
         var callbacks: UInt64
         var lastCallbackHost: UInt64
         var lastSoundHost: UInt64
+        var ioResumedHost: UInt64
         var everHadSound: Bool
     }
 
@@ -162,6 +166,7 @@ final class TapEngine: @unchecked Sendable {
         Stats(callbacks: rt.pointee.callbacks.load(ordering: .relaxed),
               lastCallbackHost: rt.pointee.lastCallbackHost.load(ordering: .relaxed),
               lastSoundHost: rt.pointee.lastSoundHost.load(ordering: .relaxed),
+              ioResumedHost: rt.pointee.ioResumedHost.load(ordering: .relaxed),
               everHadSound: rt.pointee.everHadSound.load(ordering: .relaxed))
     }
 

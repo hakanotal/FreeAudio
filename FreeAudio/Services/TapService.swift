@@ -316,14 +316,17 @@ final class TapService: ObservableObject, @unchecked Sendable {
             let stats = engine.stats
             guard stats.callbacks > 0 else { continue }
             let runningRecently = HostClock.seconds(now &- stats.lastCallbackHost) < 0.5
-            let silentFor = stats.lastSoundHost == 0 ? Double.infinity : HostClock.seconds(now &- stats.lastSoundHost)
+            // Right after IO (re)starts an engine often hears nothing for a few hundred ms (an app
+            // just starting, a stream moving to another device), and a pre-armed engine may have
+            // been idle for hours: count silence from the IO start until the first sound.
+            let silentFor = HostClock.seconds(now &- max(stats.lastSoundHost, stats.ioResumedHost))
             if runningRecently, silentFor > Self.idleRestartAfter {
                 // Restart at most once per quiet spell (some apps keep a silent stream open, and
                 // their IO would just start again).
                 if let last = idleRestarts[key], Date().timeIntervalSince(last) < 60 { continue }
                 idleRestarts[key] = Date()
                 Task { _ = await HALQueue.shared.run { engine.restartIO() } }
-                engineLog.debug("\(key, privacy: .public): idle, IO restarted")
+                engineLog.debug("\(key, privacy: .public): idle for \(Int(silentFor)) s, IO restarted")
             } else if silentFor < 1 {
                 idleRestarts.removeValue(forKey: key)
             }

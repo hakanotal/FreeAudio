@@ -17,3 +17,6 @@ All notable changes to FreeAudio are documented here.
 - Apps with saved settings are controlled from their first sound, also after a relaunch
 - Asks for System Audio Recording permission the first time it is needed; a notice links to System Settings when it is denied
 - Settings: permission status, list of saved app settings with reset, and "Restart audio engine"
+- Controlled apps follow output changes (headphones, AirPods, monitor) and keep their level; engines are rebuilt after sample-rate changes, sleep and coreaudiod restarts
+- Idle engines stop running after a few seconds of silence, so FreeAudio never keeps the Mac awake
+- A notice appears when another audio tool that taps apps (SoundSource, FineTune, eqMac and others) is running
