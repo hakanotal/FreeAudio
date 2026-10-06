@@ -1,16 +1,26 @@
 import Foundation
 
-/// What one tap engine should look like: a tap + private aggregate + IOProc that plays the app at
-/// `gain` (0 when muted). `TapService` computes the desired set from apps, settings and
-/// permission; `EngineDiff` turns the difference into actions.
+/// What one tap engine should look like: a tap + private aggregate + IOProc that plays its audio
+/// at `gain`. `TapService` computes the desired set from apps, devices, settings and permission;
+/// `EngineDiff` turns the difference into actions.
 struct EngineSpec: Equatable, Sendable {
-    /// The app's settings key (`AudioApp.id`).
+    enum Kind: Equatable, Sendable {
+        /// One controlled app (stereo mixdown of its processes), played at its gain (0 when muted).
+        case app
+        /// Software volume: everything bound for `deviceUID` except `processObjectIDs` and
+        /// `bundleIDs` (FreeAudio and the controlled apps), played at the device gain.
+        case rest(stream: UInt)
+    }
+
+    /// `AudioApp.id` for app engines, `SoftwareVolumePlan.restKey` for rest engines.
     let key: String
+    var kind: Kind = .app
     /// Output device the aggregate plays to.
     var deviceUID: String
-    /// Process objects in the tap (helpers whose bundle IDs other apps share are only here).
+    /// App engines: processes in the tap (helpers whose bundle IDs other apps share are only
+    /// here). Rest engines: processes excluded.
     var processObjectIDs: [UInt32]
-    /// Bundle IDs the tap follows across relaunches (macOS 26 `bundleIDs`, spike S5).
+    /// App engines: bundle IDs followed across relaunches (spike S5). Rest engines: excluded.
     var bundleIDs: [String]
     var gain: Float
 }
@@ -41,7 +51,14 @@ enum EngineDiff {
                 actions.append(.create(want))
                 continue
             }
-            if want.deviceUID != have.deviceUID {
+            if want.deviceUID != have.deviceUID || want.kind != have.kind {
+                actions.append(.replace(want))
+                continue
+            }
+            // A rest engine's exclusions change when apps become controlled or go back to
+            // default; the new rest engine crosses over with the old one and the app engines.
+            if case .rest = want.kind,
+               Set(want.processObjectIDs) != Set(have.processObjectIDs) || Set(want.bundleIDs) != Set(have.bundleIDs) {
                 actions.append(.replace(want))
                 continue
             }

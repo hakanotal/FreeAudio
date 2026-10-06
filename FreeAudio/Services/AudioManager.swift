@@ -25,6 +25,7 @@ final class AudioManager: ObservableObject, @unchecked Sendable {
             .store(in: &cancellables)
 
         guard engines else { return }
+        startVolumeKeys()
         let taps = TapService.shared
         devices.sampleRateChanged
             .sink { uid in taps.rebuildEngines(onDevice: uid) }
@@ -39,11 +40,49 @@ final class AudioManager: ObservableObject, @unchecked Sendable {
             .store(in: &cancellables)
     }
 
+    /// Volume keys: handled only while the default output uses software volume (no hardware
+    /// control); otherwise they pass through and macOS behaves as usual.
+    private func startVolumeKeys() {
+        let keys = VolumeKeyService.shared
+        keys.handler = { key, isRepeat, modifiers in
+            let volume = DeviceVolumeService.shared
+            guard volume.tier == .software, volume.deviceUID != nil else { return false }
+            // Like macOS: 16 steps, Option+Shift for quarter steps.
+            let fine = modifiers.contains(.option) && modifiers.contains(.shift)
+            let step = fine ? 1.0 / 64 : 1.0 / 16
+            switch key {
+            case .volumeUp: volume.step(by: step)
+            case .volumeDown: volume.step(by: -step)
+            case .mute:
+                if isRepeat { return true }
+                volume.setMuted(!volume.isMuted)
+            }
+            VolumeHUDService.shared.show(volume: volume.volume, muted: volume.isMuted, deviceName: volume.deviceName)
+            return true
+        }
+        // The event tap needs Accessibility, so only start it once a software-volume output is
+        // in use; it keeps running (passing keys through) afterwards.
+        DeviceVolumeService.shared.$tier
+            .receive(on: RunLoop.main)
+            .sink { tier in
+                guard tier == .software else { return }
+                keys.requestTrustIfNeeded()
+                keys.startIfNeeded()
+            }
+            .store(in: &cancellables)
+    }
+
     /// Called by AppDelegate after the Mac wakes.
     func handleWake() {
         DeviceService.shared.refresh()
         AppAudioService.shared.refresh()
         TapService.shared.handleWake()
+        // Event taps can come back from sleep enabled but inert: recreate it.
+        let keys = VolumeKeyService.shared
+        if keys.isRunning {
+            keys.stop()
+            keys.startIfNeeded()
+        }
     }
 
     /// Plain-text snapshot of devices, volume and app grouping (`FreeAudio --dump-audio`).

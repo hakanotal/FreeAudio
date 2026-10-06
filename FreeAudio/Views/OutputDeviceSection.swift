@@ -84,7 +84,10 @@ struct DeviceListView: View {
 struct DeviceListRow: View {
     let device: AudioDevice
     let isCurrent: Bool
+    @ObservedObject private var settings = SettingsService.shared
     @State private var isHovered = false
+
+    private var forcedSoftware: Bool { settings.deviceSetting(for: device.uid).forceSoftware }
 
     var body: some View {
         HStack(spacing: 8) {
@@ -94,9 +97,12 @@ struct DeviceListRow: View {
                 .font(.body)
                 .lineLimit(1)
                 .truncationMode(.tail)
-            if !device.hasHardwareVolume {
+            if !device.hasHardwareVolume || forcedSoftware {
                 Badge(text: L("Yazılım", "Software"), color: .orange)
-                    .help(L("Bu aygıtın donanım ses denetimi yok", "This device has no hardware volume control"))
+                    .help(device.hasHardwareVolume
+                          ? L("Bu aygıt için yazılım ses düzeyi seçildi", "Software volume is selected for this device")
+                          : L("Bu aygıtın donanım ses denetimi yok; FreeAudio yazılım ses düzeyi sağlar",
+                              "This device has no hardware volume control; FreeAudio provides software volume"))
             }
             Spacer()
             if isCurrent {
@@ -114,6 +120,14 @@ struct DeviceListRow: View {
             DeviceService.shared.setDefaultOutput(device)
         }
         .onHover { isHovered = $0 }
+        .contextMenu {
+            if device.hasHardwareVolume {
+                Toggle(L("Yazılım ses düzeyini kullan", "Use Software Volume"), isOn: Binding(
+                    get: { forcedSoftware },
+                    set: { DeviceVolumeService.shared.setForceSoftware($0, for: device) }
+                ))
+            }
+        }
         .help(isCurrent ? L("Geçerli çıkış aygıtı", "Current output device") : L("Bu aygıta geç", "Switch to this device"))
         .accessibilityLabel(isCurrent ? L("\(device.name), geçerli", "\(device.name), current") : device.name)
         .accessibilityAddTraits(isCurrent ? [.isButton, .isSelected] : .isButton)
@@ -172,8 +186,8 @@ struct DeviceVolumeRow: View {
             .padding(.horizontal, 12)
             .padding(.top, 2)
             .help(isSoftware
-                  ? L("Bu aygıtın donanım ses denetimi yok. FreeAudio yazılım ses düzeyini sonraki bir sürümde sağlayacak.",
-                      "This device has no hardware volume control. FreeAudio will provide software volume in a later version.")
+                  ? L("Bu aygıtın kullanılabilir donanım ses denetimi yok. FreeAudio ses düzeyini yazılımla ayarlar ve bu aygıt için ses tuşlarını yönetir.",
+                      "This device has no usable hardware volume control. FreeAudio sets its level in software and handles the volume keys for it.")
                   : L("Ses düzeyi doğrudan aygıtta ayarlanır", "Volume is set on the device itself"))
             .accessibilityElement(children: .combine)
 
@@ -203,15 +217,13 @@ struct DeviceVolumeRow: View {
                         }
                     }
                 }
-                .disabled(isSoftware)
                 .onChange(of: localVolume) { _, newValue in
                     guard isDragging else { return }
                     volume.setVolume(newValue)
                 }
                 .accessibilityLabel(L("Çıkış ses düzeyi", "Output volume"))
                 .accessibilityValue("\(Int((localVolume * 100).rounded()))%")
-                .help(isSoftware ? L("Yazılım ses düzeyi henüz yok", "Software volume isn't available yet")
-                                 : L("Ses düzeyini ayarlamak için sürükleyin", "Drag to adjust the volume"))
+                .help(L("Ses düzeyini ayarlamak için sürükleyin", "Drag to adjust the volume"))
 
                 Image(systemName: "speaker.wave.3.fill")
                     .font(.caption)

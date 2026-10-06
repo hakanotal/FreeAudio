@@ -107,8 +107,8 @@ func freeAudioIOProc(
 
 // MARK: - Engine
 
-/// One controlled app: a process tap and a private aggregate device with an IOProc that plays the
-/// tapped audio at the app's gain (0 when muted). `start`, `stop`, `updateProcesses` and
+/// One controlled app (or a device's rest audio, for software volume): a process tap and a private
+/// aggregate device with an IOProc that plays the tapped audio at the engine's gain. `start`, `stop`, `updateProcesses` and
 /// `restartIO` run on `HALQueue`; gain and stats are safe from any thread.
 final class TapEngine: @unchecked Sendable {
     let spec: EngineSpec
@@ -174,11 +174,20 @@ final class TapEngine: @unchecked Sendable {
 
     func start() throws {
         let system = AudioHardwareSystem.shared
-        let description = CATapDescription(stereoMixdownOfProcesses: spec.processObjectIDs)
-        if !spec.bundleIDs.isEmpty {
-            // Follow the app across relaunches (spike S5).
-            description.bundleIDs = spec.bundleIDs
-            description.isProcessRestoreEnabled = true
+        let description: CATapDescription
+        switch spec.kind {
+        case .app:
+            description = CATapDescription(stereoMixdownOfProcesses: spec.processObjectIDs)
+            if !spec.bundleIDs.isEmpty {
+                // Follow the app across relaunches (spike S5).
+                description.bundleIDs = spec.bundleIDs
+                description.isProcessRestoreEnabled = true
+            }
+        case .rest(let stream):
+            // Everything bound for this device's stream except the excluded processes and bundle
+            // IDs (FreeAudio and the controlled apps), spike S2. The stream index is global.
+            description = CATapDescription(excludingProcesses: spec.processObjectIDs, deviceUID: spec.deviceUID, stream: stream)
+            if !spec.bundleIDs.isEmpty { description.bundleIDs = spec.bundleIDs }
         }
         description.muteBehavior = .mutedWhenTapped
         description.isPrivate = true
@@ -275,7 +284,7 @@ final class TapEngine: @unchecked Sendable {
     /// Replaces the tap's processes and followed bundle IDs in place (spike S4): new helpers join
     /// a running tap without a rebuild.
     func updateTap(processObjectIDs: [UInt32], bundleIDs: [String]) throws {
-        guard let tap else { throw EngineError("no tap") }
+        guard let tap, spec.kind == .app else { throw EngineError("no app tap") }
         let description = try tap.description
         description.processes = processObjectIDs
         if !bundleIDs.isEmpty {

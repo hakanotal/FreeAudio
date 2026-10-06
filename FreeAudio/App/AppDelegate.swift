@@ -56,7 +56,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         workspaceObservers.forEach { NSWorkspace.shared.notificationCenter.removeObserver($0) }
-        SettingsService.shared.flushAppSettings()
+        VolumeKeyService.shared.stop()
+        SettingsService.shared.flushPendingSaves()
         // Destroy taps and aggregate devices before exiting (they'd also vanish with the process).
         TapService.shared.shutdown()
     }

@@ -19,4 +19,6 @@ All notable changes to FreeAudio are documented here.
 - Settings: permission status, list of saved app settings with reset, and "Restart audio engine"
 - Controlled apps follow output changes (headphones, AirPods, monitor) and keep their level; engines are rebuilt after sample-rate changes, sleep and coreaudiod restarts
 - Idle engines stop running after a few seconds of silence, so FreeAudio never keeps the Mac awake
+- Software volume for outputs without a hardware volume control (HDMI/DisplayPort monitors): the output slider and mute work, system sounds included, and controlled apps on that output combine their own level with it. "Use Software Volume" in a device's context menu forces it for devices whose hardware control doesn't work
+- Volume keys on those outputs: FreeAudio handles them (16 steps, Option+Shift for finer steps) and shows its own volume HUD at the top right; on other outputs the keys behave as usual. Needs Accessibility permission
 - A notice appears when another audio tool that taps apps (SoundSource, FineTune, eqMac and others) is running

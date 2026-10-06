@@ -1,81 +1,114 @@
 import AppKit
-import CoreGraphics
+import SwiftUI
 
-// MARK: - OSDUIHelper Protocol (Private API)
-
-/// OSDImage values for the native macOS OSD.
-@objc enum OSDImage: CLong {
-    case brightness = 1
-    case volume = 3
-    case mute = 4
-    case eject = 6
-}
-
-/// XPC protocol matching OSDUIHelper's interface.
-/// This version (with filledChiclets/totalChiclets) shows the level bar.
-@objc protocol OSDUIHelperProtocol {
-    func showImage(
-        _ img: OSDImage,
-        onDisplayID displayID: CGDirectDisplayID,
-        priority: CUnsignedInt,
-        msecUntilFade: CUnsignedInt,
-        filledChiclets: CUnsignedInt,
-        totalChiclets: CUnsignedInt,
-        locked: Bool
-    )
-}
-
-// MARK: - VolumeHUDService
-
-/// Shows the native macOS volume OSD via the private OSDUIHelper XPC service, the same
-/// indicator macOS shows for its own volume keys. Used when FreeAudio handles the keys itself
-/// (outputs without hardware volume). MonitorControl and BetterDisplay use the same service.
+/// Volume feedback when FreeAudio handles the volume keys (outputs with software volume): a small
+/// panel at the top right of the menu bar screen, in the style of the macOS 26/27 volume HUD.
+/// The system's own HUD can't be triggered by apps, and the older OSDUIHelper draws the
+/// pre-macOS 26 centered OSD (spike S9).
 @MainActor
 final class VolumeHUDService: @unchecked Sendable {
     static let shared = VolumeHUDService()
     private init() {}
 
-    // MARK: - Public API
+    private var panel: NSPanel?
+    private var hostingView: NSHostingView<VolumeHUDView>?
+    private var hideTask: Task<Void, Never>?
+    private static let size = NSSize(width: 280, height: 64)
 
-    /// Shows the volume OSD on the main display.
-    /// - Parameters:
-    ///   - volume: Slider position 0–1
-    ///   - muted: Shows the mute image with an empty bar
-    func show(volume: Double, muted: Bool) {
-        let totalChiclets: CUnsignedInt = 16
-        let filledChiclets = muted ? 0 : CUnsignedInt((min(max(volume, 0), 1) * Double(totalChiclets)).rounded())
-
-        let conn = NSXPCConnection(machServiceName: "com.apple.OSDUIHelper", options: [])
-        conn.remoteObjectInterface = NSXPCInterface(with: OSDUIHelperProtocol.self)
-        // @Sendable: XPC calls these on its own queue, never the main thread.
-        conn.interruptionHandler = { @Sendable in NSLog("[VolumeHUD] XPC connection interrupted") }
-        conn.invalidationHandler = { @Sendable in NSLog("[VolumeHUD] XPC connection invalidated") }
-        conn.resume()
-
-        // @Sendable: XPC calls this on its own queue; an implicitly main-isolated closure would trap.
-        let proxy = conn.remoteObjectProxyWithErrorHandler { @Sendable error in
-            NSLog("[VolumeHUD] XPC error: %@", error.localizedDescription)
+    /// Shows (or updates) the HUD and hides it 1.5 s after the last call.
+    func show(volume: Double, muted: Bool, deviceName: String) {
+        let view = VolumeHUDView(volume: volume, muted: muted, deviceName: deviceName)
+        let panel = self.panel ?? makePanel(with: view)
+        hostingView?.rootView = view
+        position(panel)
+        if !panel.isVisible || panel.alphaValue < 1 {
+            panel.alphaValue = 0
+            panel.orderFrontRegardless()
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0.12
+                panel.animator().alphaValue = 1
+            }
         }
-
-        guard let helper = proxy as? OSDUIHelperProtocol else {
-            NSLog("[VolumeHUD] Failed to get OSDUIHelper proxy")
-            conn.invalidate()
-            return
+        hideTask?.cancel()
+        hideTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(1500))
+            guard !Task.isCancelled, let panel = self?.panel else { return }
+            NSAnimationContext.runAnimationGroup({ context in
+                context.duration = 0.25
+                panel.animator().alphaValue = 0
+            }, completionHandler: {
+                MainActor.assumeIsolated {
+                    if panel.alphaValue == 0 { panel.orderOut(nil) }
+                }
+            })
         }
+    }
 
-        helper.showImage(
-            muted || filledChiclets == 0 ? .mute : .volume,
-            onDisplayID: CGMainDisplayID(),
-            priority: 0x1f4,
-            msecUntilFade: 1500,
-            filledChiclets: filledChiclets,
-            totalChiclets: totalChiclets,
-            locked: false
-        )
+    private func makePanel(with view: VolumeHUDView) -> NSPanel {
+        let panel = NSPanel(contentRect: NSRect(origin: .zero, size: Self.size),
+                            styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        panel.level = .statusBar
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.hasShadow = true
+        panel.ignoresMouseEvents = true
+        panel.isReleasedWhenClosed = false
+        let hosting = NSHostingView(rootView: view)
+        hosting.frame = NSRect(origin: .zero, size: Self.size)
+        panel.contentView = hosting
+        self.panel = panel
+        hostingView = hosting
+        return panel
+    }
 
-        // Invalidate after a short delay to allow the XPC message to be delivered
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-            conn.invalidate()
+    /// Top right of the screen with the menu bar, just below it.
+    private func position(_ panel: NSPanel) {
+        guard let screen = NSScreen.screens.first else { return }
+        let visible = screen.visibleFrame
+        panel.setFrameOrigin(NSPoint(x: visible.maxX - Self.size.width - 10, y: visible.maxY - Self.size.height - 10))
+    }
+}
+
+struct VolumeHUDView: View {
+    let volume: Double
+    let muted: Bool
+    let deviceName: String
+
+    private var icon: String {
+        if muted || volume == 0 { return "speaker.slash.fill" }
+        if volume < 0.34 { return "speaker.wave.1.fill" }
+        if volume < 0.67 { return "speaker.wave.2.fill" }
+        return "speaker.wave.3.fill"
+    }
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: icon)
+                .font(.system(size: 18, weight: .medium))
+                .foregroundStyle(.primary)
+                .frame(width: 26)
+            VStack(alignment: .leading, spacing: 7) {
+                Text(deviceName)
+                    .font(.system(size: 12, weight: .semibold))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                GeometryReader { geometry in
+                    ZStack(alignment: .leading) {
+                        Capsule().fill(Color.primary.opacity(0.15))
+                        Capsule()
+                            .fill(Color.primary.opacity(muted ? 0.35 : 0.9))
+                            .frame(width: geometry.size.width * (muted ? 0 : min(max(volume, 0), 1)))
+                    }
+                }
+                .frame(height: 6)
+            }
         }
+        .padding(.horizontal, 16)
+        .frame(width: 280, height: 64)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(muted ? L("\(deviceName) sessiz", "\(deviceName) muted")
+                                  : L("\(deviceName) ses düzeyi %\(Int((volume * 100).rounded()))", "\(deviceName) volume \(Int((volume * 100).rounded())) percent"))
     }
 }

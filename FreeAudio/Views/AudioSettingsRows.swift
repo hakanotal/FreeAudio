@@ -4,7 +4,9 @@ import SwiftUI
 struct AudioSettingsRows: View {
     @ObservedObject private var settings = SettingsService.shared
     @ObservedObject private var permission = PermissionService.shared
+    @ObservedObject private var devices = DeviceService.shared
     @State private var showSaved = false
+    @State private var keysTrusted = VolumeKeyService.isTrusted
 
     private var permissionText: (String, Color) {
         switch permission.status {
@@ -36,6 +38,29 @@ struct AudioSettingsRows: View {
             .padding(.horizontal, 12)
             .help(L("Uygulama ses düzeyleri için gerekir. Gizlilik ve Güvenlik → Ekran ve Sistem Sesi Kaydı altında yönetilir.",
                     "Needed for per-app volume. Managed under Privacy & Security → Screen & System Audio Recording."))
+
+            // Volume keys (only relevant with a software-volume output)
+            if devices.outputDevices.contains(where: { !$0.hasHardwareVolume || settings.deviceSetting(for: $0.uid).forceSoftware }) {
+                HStack(spacing: 6) {
+                    MenuItemIcon(systemName: "keyboard", color: .blue)
+                        .accessibilityHidden(true)
+                    Text(L("Ses tuşları", "Volume keys"))
+                        .font(.body)
+                    Spacer(minLength: 8)
+                    Text(keysTrusted ? L("Hazır", "Ready") : L("Erişilebilirlik izni gerekli", "Needs Accessibility"))
+                        .font(.caption)
+                        .foregroundColor(keysTrusted ? .green : .orange)
+                    if !keysTrusted {
+                        Button(L("Aç", "Open")) { VolumeKeyService.shared.openAccessibilitySettings() }
+                            .buttonStyle(.borderless)
+                            .font(.caption)
+                    }
+                }
+                .padding(.horizontal, 12)
+                .help(L("Yazılım ses düzeyli bir çıkışta (ör. HDMI monitör) ses tuşlarını FreeAudio yönetir. Bunun için Gizlilik ve Güvenlik → Erişilebilirlik altında izin gerekir.",
+                        "On an output with software volume (e.g. an HDMI monitor) FreeAudio handles the volume keys. This needs permission under Privacy & Security → Accessibility."))
+                .onAppear { keysTrusted = VolumeKeyService.isTrusted }
+            }
 
             // Saved per-app settings
             HStack(spacing: 6) {

@@ -37,6 +37,9 @@ final class TapService: ObservableObject, @unchecked Sendable {
     private var previousDefaultUID: String?
     private var defaultChangedAt: Date = .distantPast
     private var workspaceObservers: [NSObjectProtocol] = []
+    /// When the default output's software volume returned to 100% (rest engine hysteresis).
+    private var restUnitySince: Date?
+    private var streamIndexCache: [String: UInt] = [:]
 
     /// After a default-output change, apps still reported on the old default follow the new one
     /// for this long (their Devices property can lag behind the move).
@@ -48,6 +51,9 @@ final class TapService: ObservableObject, @unchecked Sendable {
     private static let failureBackoff: TimeInterval = 15
     /// Linear crossfade when an engine is rebuilt on the same device.
     private static let crossfadeSeconds = 0.05
+    /// The rest engine outlives a return to 100% by this long, so dragging through 100% doesn't
+    /// tear it down and rebuild it.
+    private static let restHysteresis: TimeInterval = 2
 
     func start() {
         guard cancellables.isEmpty else { return }
@@ -69,6 +75,14 @@ final class TapService: ObservableObject, @unchecked Sendable {
                 // Published before the value is stored: reconcile on the next turn.
                 Task { @MainActor in self?.reconcile() }
             }
+            .store(in: &cancellables)
+        SettingsService.shared.$deviceSettings
+            .sink { [weak self] _ in
+                Task { @MainActor in self?.reconcile() }
+            }
+            .store(in: &cancellables)
+        DeviceService.shared.$outputDevices
+            .sink { [weak self] _ in self?.scheduleReconcile() }
             .store(in: &cancellables)
         DeviceService.shared.$defaultOutputUID
             .sink { [weak self] uid in self?.defaultOutputChanged(to: uid) }
@@ -122,8 +136,11 @@ final class TapService: ObservableObject, @unchecked Sendable {
     private func desiredSpecs() -> [String: EngineSpec] {
         let settings = SettingsService.shared
         let apps = AppAudioService.shared.allApps
-        // Saved settings are never default, and their apps get (pre-armed) taps.
-        let needsTaps = !settings.appSettings.isEmpty
+        // Saved settings are never default, and their apps get (pre-armed) taps. A software
+        // volume below 100% on the default output needs a rest tap.
+        let defaultDevice = DeviceService.shared.defaultOutput
+        let defaultDeviceSetting = defaultDevice.map { settings.deviceSetting(for: $0.uid) }
+        let needsTaps = !settings.appSettings.isEmpty || defaultDeviceSetting.map { !$0.isUnity } == true
         let permission = PermissionService.shared
         if needsTaps, permission.status == .notDetermined { permission.requestIfNeeded() }
         guard permission.allowsTaps else {
@@ -182,7 +199,49 @@ final class TapService: ObservableObject, @unchecked Sendable {
                 bundleIDs: EngineDiff.followedBundleIDs(appBundleID: key, helperBundleIDs: setting.helpers ?? []),
                 gain: Self.gain(for: setting))
         }
+        addSoftwareVolume(to: &desired, device: defaultDevice, setting: defaultDeviceSetting, now: now)
         return desired
+    }
+
+    /// Software volume on the default output (no hardware volume, or forced): a rest engine for
+    /// everything that isn't a controlled app, and the device gain on the app engines there.
+    private func addSoftwareVolume(to desired: inout [String: EngineSpec], device: AudioDevice?, setting: DeviceSetting?, now: Date) {
+        guard let device, let setting, !device.hasHardwareVolume || setting.forceSoftware else {
+            restUnitySince = nil
+            return
+        }
+        let restKey = SoftwareVolumePlan.restKey(deviceUID: device.uid)
+        if setting.isUnity {
+            // Back at 100%: keep an existing rest engine briefly, then let audio play untouched.
+            guard specs[restKey] != nil else { restUnitySince = nil; return }
+            if restUnitySince == nil {
+                restUnitySince = now
+                Task { @MainActor in
+                    try? await Task.sleep(for: .seconds(Self.restHysteresis + 0.1))
+                    self.reconcile()
+                }
+            }
+            guard let since = restUnitySince, now.timeIntervalSince(since) < Self.restHysteresis else { return }
+        } else {
+            restUnitySince = nil
+        }
+        guard let stream = streamIndex(for: device) else { return }
+        SoftwareVolumePlan.applyDeviceGain(&desired, deviceUID: device.uid, deviceGain: setting.gain)
+        let ownObjects = (try? AudioHardwareSystem.shared.process(for: getpid())).map { [$0.id] } ?? []
+        desired[restKey] = SoftwareVolumePlan.restSpec(
+            deviceUID: device.uid, stream: stream, deviceGain: setting.gain,
+            appSpecs: Array(desired.values), ownProcessObjectIDs: ownObjects,
+            ownBundleID: Bundle.main.bundleIdentifier ?? "com.freeaudio.app")
+    }
+
+    /// Global index of the device's first output stream (the tap API wants the index in the
+    /// device's full stream list).
+    private func streamIndex(for device: AudioDevice) -> UInt? {
+        if let cached = streamIndexCache[device.uid] { return cached }
+        let streams = (try? AudioHardwareDevice(id: device.objectID).streams) ?? []
+        guard let index = streams.firstIndex(where: { (try? $0.direction) == .output }) else { return nil }
+        streamIndexCache[device.uid] = UInt(index)
+        return UInt(index)
     }
 
     /// Muting is gain 0 on the regular engine: a gain change fades in 30 ms with no HAL work.
@@ -204,8 +263,36 @@ final class TapService: ObservableObject, @unchecked Sendable {
 
     private func apply(_ actions: [EngineAction]) {
         guard !actions.isEmpty else { return }
+        // Devices whose rest engine is replaced in this batch: the new rest engine, app engines
+        // created there and the outgoing engines all cross over at one host time (spike S3).
+        let handoverDevices = Set(actions.compactMap { action -> String? in
+            if case .replace(let spec) = action, case .rest = spec.kind { return spec.deviceUID }
+            return nil
+        })
+        var incoming: [(engine: TapEngine, gain: Float)] = []
+        var outgoing: [(engine: TapEngine, gain: Float)] = []
+
         for action in actions {
             switch action {
+            case .create(let spec) where spec.kind == .app && handoverDevices.contains(spec.deviceUID):
+                let engine = TapEngine(spec: spec)
+                engine.setGain(0)
+                engines[spec.key] = engine
+                specs[spec.key] = spec
+                incoming.append((engine, spec.gain))
+
+            case .replace(let spec) where handoverDevices.contains(spec.deviceUID) && spec.kind != .app:
+                if let old = engines[spec.key] { outgoing.append((old, specs[spec.key]?.gain ?? old.spec.gain)) }
+                let engine = TapEngine(spec: spec)
+                engine.setGain(0)
+                engines[spec.key] = engine
+                specs[spec.key] = spec
+                incoming.append((engine, spec.gain))
+
+            case .destroy(let key) where engines[key].map({ handoverDevices.contains($0.spec.deviceUID) }) == true:
+                if let engine = engines.removeValue(forKey: key) { outgoing.append((engine, specs[key]?.gain ?? engine.spec.gain)) }
+                specs.removeValue(forKey: key)
+
             case .setGain(let key, let gain):
                 engines[key]?.setGain(gain)
                 specs[key]?.gain = gain
@@ -242,10 +329,52 @@ final class TapService: ObservableObject, @unchecked Sendable {
             case .destroy(let key):
                 guard let engine = engines.removeValue(forKey: key) else { continue }
                 specs.removeValue(forKey: key)
-                retire(engine)
+                // A rest engine is only removed at 100% (unity gain): stop it without a fade so the
+                // untouched audio carries on seamlessly instead of dipping.
+                retire(engine, fade: engine.spec.kind == .app)
             }
         }
+        if !incoming.isEmpty || !outgoing.isEmpty { handover(incoming: incoming, outgoing: outgoing) }
         publishKeys()
+    }
+
+    /// Starts `incoming` silent, then crosses them over with `outgoing` at one host time, then
+    /// retires `outgoing`.
+    private func handover(incoming: [(engine: TapEngine, gain: Float)], outgoing: [(engine: TapEngine, gain: Float)]) {
+        Task { @MainActor in
+            var started: [(engine: TapEngine, gain: Float)] = []
+            for item in incoming {
+                let key = item.engine.spec.key
+                let outcome = await HALQueue.shared.run { try item.engine.start() }
+                switch outcome {
+                case .done:
+                    started.append(item)
+                case .failed(let message):
+                    engineLog.error("\(key, privacy: .public): engine failed to start: \(message, privacy: .public)")
+                    failureTimes[key] = Date()
+                    if engines[key] === item.engine {
+                        engines.removeValue(forKey: key)
+                        specs.removeValue(forKey: key)
+                    }
+                    retire(item.engine)
+                case .timedOut:
+                    state = .stuck
+                }
+            }
+            // After the new engines' output gates have opened (40 ms fade on first sound).
+            let start = HostClock.now + HostClock.ticks(0.1)
+            for item in started {
+                // Use the current gain: the user may have moved a slider meanwhile.
+                let gain = specs[item.engine.spec.key]?.gain ?? item.gain
+                item.engine.scheduleRamp(from: 0, to: gain, startHost: start, seconds: Self.crossfadeSeconds)
+            }
+            for item in outgoing {
+                item.engine.scheduleRamp(from: item.gain, to: 0, startHost: start, seconds: Self.crossfadeSeconds)
+            }
+            try? await Task.sleep(for: .milliseconds(200))
+            outgoing.forEach { retire($0.engine, fade: false) }
+            publishKeys()
+        }
     }
 
     /// Starts `engine`; once it runs, retires `old` (new before old, so the app is never heard
@@ -287,12 +416,12 @@ final class TapService: ObservableObject, @unchecked Sendable {
         }
     }
 
-    /// Fades an engine out and tears it down on the HAL queue.
-    private func retire(_ engine: TapEngine) {
-        engine.setGain(0)
+    /// Tears an engine down on the HAL queue, by default after fading it out.
+    private func retire(_ engine: TapEngine, fade: Bool = true) {
+        if fade { engine.setGain(0) }
         Task { @MainActor in
             let outcome = await HALQueue.shared.run {
-                usleep(40_000)  // let the 30 ms ramp reach silence
+                if fade { usleep(40_000) }  // let the 30 ms ramp reach silence
                 engine.stop()
             }
             if outcome == .timedOut { state = .stuck }
@@ -338,6 +467,7 @@ final class TapService: ObservableObject, @unchecked Sendable {
 
     /// A device's sample rate changed: its aggregates went silent, so rebuild their engines.
     func rebuildEngines(onDevice uid: String) {
+        streamIndexCache.removeValue(forKey: uid)
         let affected = specs.values.filter { $0.deviceUID == uid }
         guard !affected.isEmpty else { return }
         engineLog.notice("rebuilding \(affected.count) engine(s) on \(uid, privacy: .public)")
@@ -389,7 +519,7 @@ final class TapService: ObservableObject, @unchecked Sendable {
         specs = [:]
         failureTimes = [:]
         idleRestarts = [:]
-        old.forEach(retire)
+        old.forEach { retire($0) }
         state = .ok
         publishKeys()
         Task { @MainActor in
@@ -414,7 +544,7 @@ final class TapService: ObservableObject, @unchecked Sendable {
         specs.keys.sorted().map { key in
             let spec = specs[key]!
             let engine = engines[key]
-            return "  \(key): device=\(spec.deviceUID) gain=\(spec.gain) processes=\(spec.processObjectIDs) follows=\(spec.bundleIDs) callbacks=\(engine?.stats.callbacks ?? 0)"
+            return "  \(key): \(spec.kind) device=\(spec.deviceUID) gain=\(spec.gain) processes=\(spec.processObjectIDs) follows=\(spec.bundleIDs) callbacks=\(engine?.stats.callbacks ?? 0)"
         }
     }
 }

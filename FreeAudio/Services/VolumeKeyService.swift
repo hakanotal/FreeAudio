@@ -31,7 +31,34 @@ final class VolumeKeyService: @unchecked Sendable {
     }
 
     /// Decides whether FreeAudio handles a key-down. Return true to consume the event.
-    var handler: ((Key, _ isRepeat: Bool) -> Bool)?
+    var handler: ((Key, _ isRepeat: Bool, _ modifiers: NSEvent.ModifierFlags) -> Bool)?
+
+    var isRunning: Bool { eventTap != nil }
+
+    /// Accessibility permission, which the event tap needs.
+    static var isTrusted: Bool { AXIsProcessTrusted() }
+
+    /// Shows the macOS Accessibility prompt (once per launch at most).
+    private var promptedForTrust = false
+    func requestTrustIfNeeded() {
+        guard !Self.isTrusted, !promptedForTrust else { return }
+        promptedForTrust = true
+        // The literal key: the kAXTrustedCheckOptionPrompt global isn't concurrency-safe in Swift 6.
+        _ = AXIsProcessTrustedWithOptions(["AXTrustedCheckOptionPrompt": true] as CFDictionary)
+    }
+
+    func openAccessibilitySettings() {
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
+            NSWorkspace.shared.open(url)
+        }
+    }
+
+    /// Starts the tap if it isn't running (e.g. after Accessibility was granted).
+    func startIfNeeded() {
+        guard eventTap == nil else { return }
+        pollRetryCount = 0
+        start()
+    }
 
     // MARK: - Private State
 
@@ -179,7 +206,8 @@ final class VolumeKeyService: @unchecked Sendable {
         // Key-ups always pass through; only key-downs FreeAudio handles are consumed.
         guard isKeyDown else { return Unmanaged.passUnretained(event) }
 
-        let consumed = MainActor.assumeIsolated { handler?(key, isRepeat) ?? false }
+        let modifiers = nsEvent.modifierFlags
+        let consumed = MainActor.assumeIsolated { handler?(key, isRepeat, modifiers) ?? false }
         return consumed ? nil : Unmanaged.passUnretained(event)
     }
 }

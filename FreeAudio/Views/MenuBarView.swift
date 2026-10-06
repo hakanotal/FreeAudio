@@ -178,6 +178,8 @@ struct MenuBarView: View {
         .onAppear {
             AppAudioService.shared.panelVisible = true
             PermissionService.shared.refresh()
+            // Accessibility may have been granted since the key tap last tried to start.
+            if DeviceVolumeService.shared.tier == .software { VolumeKeyService.shared.startIfNeeded() }
         }
         .onDisappear { AppAudioService.shared.panelVisible = false }
         .task {

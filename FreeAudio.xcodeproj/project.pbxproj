@@ -17,6 +17,7 @@
 		461F6621EC8707FDDA5A2D43 /* DeviceService.swift in Sources */ = {isa = PBXBuildFile; fileRef = CAC3EFA2E467F2A499FB7115 /* DeviceService.swift */; };
 		475C6E77F0841B15E65D943F /* AppListSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94C22651E0A0A064A8BB2D58 /* AppListSection.swift */; };
 		4B02C02E19C64595BCCF8066 /* LaunchService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 458572C175A26C2671406A89 /* LaunchService.swift */; };
+		4C7817C07064162BAF486AF5 /* DeviceSetting.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F77D56D2CE7F2E2AAF59C8D /* DeviceSetting.swift */; };
 		55A47BCCE59BB39AC5EDF9C0 /* AudioSettingsRows.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6AF06066CADFB4496A681F0C /* AudioSettingsRows.swift */; };
 		67D70F3EC4B7C5ACDA4D6962 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A2CD185EED4B4F0FDC13139 /* AppDelegate.swift */; };
 		6DA8B4B1FD3294C719AA035A /* VolumeHUDService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 78835C172B8ACB87F09CC861 /* VolumeHUDService.swift */; };
@@ -45,6 +46,7 @@
 		2CA82B08BE4E8AC55AA1A2D1 /* PrivateAPI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrivateAPI.swift; sourceTree = "<group>"; };
 		319FE11F83AF36CA218B98F9 /* FreeAudio.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = FreeAudio.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		3535E833AD4C8180A9475385 /* EngineDiff.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EngineDiff.swift; sourceTree = "<group>"; };
+		3F77D56D2CE7F2E2AAF59C8D /* DeviceSetting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceSetting.swift; sourceTree = "<group>"; };
 		458572C175A26C2671406A89 /* LaunchService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LaunchService.swift; sourceTree = "<group>"; };
 		59175137BA39669ED77CCED1 /* PermissionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PermissionService.swift; sourceTree = "<group>"; };
 		6885A27D791E24F540F03CFA /* AppGrouping.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppGrouping.swift; sourceTree = "<group>"; };
@@ -152,6 +154,7 @@
 			children = (
 				6885A27D791E24F540F03CFA /* AppGrouping.swift */,
 				B2B23BE93CE27880A18F9A2C /* AppSetting.swift */,
+				3F77D56D2CE7F2E2AAF59C8D /* DeviceSetting.swift */,
 				3535E833AD4C8180A9475385 /* EngineDiff.swift */,
 				240D0A39409C4B0D8C78E531 /* RenderKernel.swift */,
 				F942BDBF5F9378B63098379C /* VolumeCurve.swift */,
@@ -254,6 +257,7 @@
 				BB2A5691C28543C1A85A6B60 /* CGHelpers.swift in Sources */,
 				867B67AAC85C33CEECDEFE89 /* CoreAudio+Extensions.swift in Sources */,
 				461F6621EC8707FDDA5A2D43 /* DeviceService.swift in Sources */,
+				4C7817C07064162BAF486AF5 /* DeviceSetting.swift in Sources */,
 				406456D271B37C171C889F08 /* DeviceVolumeService.swift in Sources */,
 				9C7E42F5E651830BA959293C /* EngineDiff.swift in Sources */,
 				AC71AF9152CB06ED0C2116E8 /* FreeAudioApp.swift in Sources */,

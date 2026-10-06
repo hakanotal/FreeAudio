@@ -20,6 +20,7 @@ final class SettingsService: ObservableObject, @unchecked Sendable {
     private init() {
         loadAll()
         loadAppSettings()
+        loadDeviceSettings()
     }
 
     // MARK: - Keys
@@ -104,16 +105,66 @@ final class SettingsService: ObservableObject, @unchecked Sendable {
         }
     }
 
-    /// Writes pending app settings immediately (on quit).
-    func flushAppSettings() {
-        guard appSettingsSaveTask != nil else { return }
-        appSettingsSaveTask?.cancel()
-        saveAppSettingsNow()
+    /// Writes pending app and device settings immediately (on quit).
+    func flushPendingSaves() {
+        if appSettingsSaveTask != nil {
+            appSettingsSaveTask?.cancel()
+            saveAppSettingsNow()
+        }
+        if deviceSettingsSaveTask != nil {
+            deviceSettingsSaveTask?.cancel()
+            saveDeviceSettingsNow()
+        }
     }
 
     private func saveAppSettingsNow() {
         appSettingsSaveTask = nil
         save(AppSettingsFile(apps: appSettings), filename: Self.appSettingsFile)
+    }
+
+    // MARK: - Per-Device Settings
+
+    /// Saved per-device settings keyed by device UID. Devices at default settings have no entry.
+    @Published private(set) var deviceSettings: [String: DeviceSetting] = [:]
+
+    private static let deviceSettingsFile = "devices.json"
+    private var deviceSettingsSaveTask: Task<Void, Never>?
+
+    func deviceSetting(for uid: String) -> DeviceSetting {
+        deviceSettings[uid] ?? DeviceSetting()
+    }
+
+    func updateDeviceSetting(_ uid: String, name: String?, _ change: (inout DeviceSetting) -> Void) {
+        var setting = deviceSetting(for: uid)
+        change(&setting)
+        if let name { setting.name = name }
+        let newValue: DeviceSetting? = setting.isDefault ? nil : setting
+        guard deviceSettings[uid] != newValue else { return }
+        deviceSettings[uid] = newValue
+        deviceSettingsSaveTask?.cancel()
+        deviceSettingsSaveTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(500))
+            guard !Task.isCancelled else { return }
+            self?.saveDeviceSettingsNow()
+        }
+    }
+
+    private func loadDeviceSettings() {
+        let url = supportDir.appendingPathComponent(Self.deviceSettingsFile)
+        guard let data = try? Data(contentsOf: url) else { return }
+        do {
+            deviceSettings = try JSONDecoder().decode(DeviceSettingsFile.self, from: data).devices.filter { !$0.value.isDefault }
+        } catch {
+            let backup = supportDir.appendingPathComponent("devices.backup.json")
+            try? FileManager.default.removeItem(at: backup)
+            try? FileManager.default.moveItem(at: url, to: backup)
+            NSLog("[SettingsService] devices.json unreadable (%@); moved to devices.backup.json", error.localizedDescription)
+        }
+    }
+
+    private func saveDeviceSettingsNow() {
+        deviceSettingsSaveTask = nil
+        save(DeviceSettingsFile(devices: deviceSettings), filename: Self.deviceSettingsFile)
     }
 
     // MARK: - JSON Persistence Helpers
