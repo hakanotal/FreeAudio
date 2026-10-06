@@ -50,7 +50,8 @@ final class AppAudioService: ObservableObject, @unchecked Sendable {
     private func scheduleRefresh() {
         refreshTask?.cancel()
         refreshTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .milliseconds(100))
+            // Short: a new audio process of a controlled app plays unprocessed until its tap exists.
+            try? await Task.sleep(for: .milliseconds(20))
             guard !Task.isCancelled else { return }
             self?.refresh()
         }

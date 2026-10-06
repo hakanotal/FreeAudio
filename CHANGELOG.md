@@ -13,3 +13,7 @@ All notable changes to FreeAudio are documented here.
 - Output volume slider and mute for devices with hardware volume, kept in sync with the keyboard and System Settings
 - App list: the apps playing audio, with icons, helper processes grouped under their app (read-only for now)
 - `FreeAudio --dump-audio` prints a diagnostics snapshot of devices and app grouping
+- Per-app volume: a slider, mute button and boost (Off / 150% / 200%) for every app playing audio, remembered per app. Apps at default settings are left untouched; controlled apps are muted at the source and replayed at the chosen level
+- Apps with saved settings are controlled from their first sound, also after a relaunch
+- Asks for System Audio Recording permission the first time it is needed; a notice links to System Settings when it is denied
+- Settings: permission status, list of saved app settings with reset, and "Restart audio engine"

@@ -28,7 +28,8 @@ if xcodebuild -version >/dev/null 2>&1; then
   codesign --force --sign - --entitlements "$APP_NAME/$APP_NAME.entitlements" "$APP_PATH"
 else
   echo "=== Xcode not found; building ${APP_NAME} ${VERSION} with Command Line Tools ==="
-  "$ROOT/scripts/build-app-clt.sh"
+  # Releases are ad-hoc signed; the local "FreeAudio Dev" identity is for development only.
+  CODESIGN_IDENTITY=- "$ROOT/scripts/build-app-clt.sh"
   APP_PATH="$BUILD_DIR/${APP_NAME}.app"
 fi
 

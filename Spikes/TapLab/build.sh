@@ -19,6 +19,9 @@ swiftc -O -sdk "$SDK" -target arm64-apple-macos27.0 \
   -o "$APP/Contents/MacOS/TapLab"
 cp "$HERE/Info.plist" "$APP/Contents/Info.plist"
 plutil -lint "$APP/Contents/Info.plist" >/dev/null
+if [ -z "${CODESIGN_IDENTITY:-}" ] && security find-certificate -c "FreeAudio Dev" >/dev/null 2>&1; then
+  CODESIGN_IDENTITY="FreeAudio Dev"
+fi
 codesign --force --sign "${CODESIGN_IDENTITY:--}" "$APP"
 echo "Built $APP"
 

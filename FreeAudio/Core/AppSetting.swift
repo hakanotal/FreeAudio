@@ -12,12 +12,16 @@ struct AppSetting: Codable, Equatable, Sendable {
     var boost: Double = 1
     /// Display name, so the saved-settings list can show apps that aren't running.
     var name: String?
+    /// Helper bundle IDs seen for this app (e.g. `com.google.Chrome.helper`), so a tap prepared
+    /// before the app runs already follows its helpers.
+    var helpers: [String]?
 
-    init(volume: Double = 1, muted: Bool = false, boost: Double = 1, name: String? = nil) {
+    init(volume: Double = 1, muted: Bool = false, boost: Double = 1, name: String? = nil, helpers: [String]? = nil) {
         self.volume = volume
         self.muted = muted
         self.boost = boost
         self.name = name
+        self.helpers = helpers
     }
 
     /// At default settings an app is left alone (no tap).
@@ -33,7 +37,7 @@ struct AppSetting: Codable, Equatable, Sendable {
     // Tolerant decoding: missing keys take defaults and bad values are clamped, so an older or
     // hand-edited file never wipes the user's settings.
     private enum CodingKeys: String, CodingKey {
-        case volume, muted, boost, name
+        case volume, muted, boost, name, helpers
     }
 
     init(from decoder: Decoder) throws {
@@ -44,6 +48,7 @@ struct AppSetting: Codable, Equatable, Sendable {
         let boost = (try? container.decodeIfPresent(Double.self, forKey: .boost)) ?? 1
         self.boost = Self.boostLevels.min { abs($0 - boost) < abs($1 - boost) } ?? 1
         name = try? container.decodeIfPresent(String.self, forKey: .name)
+        helpers = try? container.decodeIfPresent([String].self, forKey: .helpers)
     }
 }
 

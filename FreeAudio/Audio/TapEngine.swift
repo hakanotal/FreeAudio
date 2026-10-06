@@ -246,7 +246,7 @@ final class TapEngine: @unchecked Sendable {
 
         status = AudioDeviceStart(aggregate.id, newProcID)
         guard status == noErr else { throw EngineError("AudioDeviceStart failed (\(status))") }
-        engineLog.info("\(self.spec.key, privacy: .public): engine on \(self.spec.deviceUID, privacy: .public) at \(sampleRate) Hz, gain \(self.spec.gain)")
+        engineLog.notice("\(self.spec.key, privacy: .public): engine on \(self.spec.deviceUID, privacy: .public) at \(sampleRate) Hz, gain \(self.spec.gain)")
     }
 
     /// Wrapping a duplex device (USB interface, headset) makes the aggregate open its inputs too,

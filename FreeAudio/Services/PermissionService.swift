@@ -27,12 +27,14 @@ final class PermissionService: ObservableObject, @unchecked Sendable {
         refresh()
         guard status == .notDetermined, !requestInFlight else { return }
         requestInFlight = true
-        let started = PrivateAPI.requestAudioCapture { _ in
+        let started = PrivateAPI.requestAudioCapture { granted in
+            engineLog.notice("System Audio Recording request answered: \(granted)")
             Task { @MainActor in
                 PermissionService.shared.requestInFlight = false
                 PermissionService.shared.refresh()
             }
         }
+        engineLog.notice("System Audio Recording requested (started: \(started))")
         if !started { requestInFlight = false }
     }
 

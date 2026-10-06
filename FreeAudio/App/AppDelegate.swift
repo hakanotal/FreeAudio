@@ -31,24 +31,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             $0.bundleIdentifier == Bundle.main.bundleIdentifier &&
             $0.processIdentifier != ProcessInfo.processInfo.processIdentifier
         }
-        var replacedInstances: [NSRunningApplication] = []
-        if !otherInstances.isEmpty {
-            if LaunchService.isManagedLaunch {
-                // Started by the launchd agent (login / crash restart / hand-over): replace the
-                // manually opened copy so the supervised instance is the one that keeps running.
-                otherInstances.forEach { $0.terminate() }
-                replacedInstances = otherInstances
-            } else {
+        let managed = LaunchService.isManagedLaunch
+        if managed {
+            // Started by the launchd agent (login / crash restart / hand-over): replace the
+            // manually opened copy so the supervised instance is the one that keeps running.
+            otherInstances.forEach { $0.terminate() }
+        }
+
+        Task { @MainActor in
+            // A quitting instance tears down its process taps; wait until it is gone before
+            // starting audio work (taps from two processes on the same device interfere). A
+            // manual launch also waits briefly: the other copy may be quitting, or be a
+            // short-lived `--dump-audio` run.
+            await Self.waitForTermination(of: otherInstances, timeout: managed ? 5 : 2)
+            if !managed, otherInstances.contains(where: { !$0.isTerminated }) {
                 print("[FreeAudio] Another instance is already running, exiting.")
                 NSApp.terminate(nil)
                 return
             }
-        }
-
-        Task { @MainActor in
-            // A quitting instance tears down its process taps. Wait until it is gone before
-            // starting audio work: taps from two processes on the same device interfere.
-            await Self.waitForTermination(of: replacedInstances, timeout: 5)
             self.startServices()
         }
     }

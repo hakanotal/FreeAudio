@@ -25,8 +25,14 @@ Hard-won constraints. Each one cost real debugging time; don't relearn them.
   - S3: handing a process from the rest tap to its own tap with linear crossfades scheduled in host time (each IOProc computes its gain per frame from its output timestamp) is clean by ear over 20 handovers. Aggregates on the same device do not share IO timestamps, so never match buffers by timestamp equality.
   - A tap whose processes are all silent gets no callbacks, so "wait for the first callback" is only a valid readiness check for an engine whose source is playing.
   - Power: once an aggregate's IO has started it keeps running after its source stops (~94 callbacks/s), and coreaudiod holds a `PreventUserIdleSystemSleep` assertion per running aggregate, so the Mac never idle-sleeps. `AudioDeviceStop` + `AudioDeviceStart` on the idle aggregate drops callbacks to 0 and releases the assertion while keeping tap and aggregate; `TapAutoStart` resumes IO when the source plays.
+- Phase 2 live test (2026-10-06): with the fast path, a controlled app's engine starts ~90 ms after its audio process appears (~350 ms with the earlier 100 + 150 ms debounces, audible as a loud start). Apps with saved settings get a pre-armed bundle-ID tap before they run, so normal apps are controlled from the first sample; plain executables (`afplay`) still get the ~90 ms gap. `kill -9` and a normal quit both return the app to full volume at once.
 - Core Audio reuses process object IDs after a process exits (three successive `afplay` PIDs all got object 123). Never cache an object ID beyond the process's lifetime.
 - A process gets a Core Audio process object as soon as it talks to the HAL, before it plays anything, so FreeAudio can exclude its own object from taps from the start. Process objects also exist for idle apps (`isRunningOutput == false`). (TapLab, 2026-10-06)
+
+## Permissions and signing
+
+- macOS judges a process started from a terminal by the terminal app's grants (the responsible process). `FreeAudio --dump-audio` run from a shell reports Cursor's System Audio Recording status, not FreeAudio's. Launch with `open` for anything permission-related.
+- Ad-hoc signatures change every build, and TCC drops the grant each time. A self-signed "FreeAudio Dev" code-signing certificate (imported with `security import … -T /usr/bin/codesign`; untrusted is fine) gives a designated requirement of `identifier "com.freeaudio.app" and certificate leaf = H"…"`, which is stable, so grants survive rebuilds. `build-app-clt.sh` uses it automatically; release builds stay ad-hoc.
 
 ## Private APIs
 
@@ -47,7 +53,8 @@ Hard-won constraints. Each one cost real debugging time; don't relearn them.
 - Lock mutable state that is read from multiple threads.
 - Set `NSWindow.isReleasedWhenClosed = false` for windows you keep in a dictionary.
 - Don't mutate a dictionary while iterating it; collect the keys first.
-- Wrap blocking system calls in a timeout (`CGHelpers.runWithTimeout`). It returns the fallback on timeout, but the stuck call keeps running on its thread.
+- Wrap blocking system calls in a timeout (`CGHelpers.runWithTimeout`, `HALQueue.run`). It returns on timeout, but the stuck call keeps running on its thread.
+- The single-instance check must tolerate short-lived copies: an old instance that is still quitting, or a `--dump-audio` run, made a fresh launch exit at once. A manual launch now waits up to 2 s for other copies to go away.
 - Event tap callbacks don't own the passed-in event: return `Unmanaged.passUnretained(event)` to pass it through. `passRetained` leaks one event per call.
 - Swift 6 inserts a runtime main-thread check into closures created in a `@MainActor` context and passed as non-`@Sendable` parameters. If such a closure runs on another queue (DDC completions, XPC handlers, audio callbacks), the app traps. Mark completion handlers that run off-main `@Sendable`.
 

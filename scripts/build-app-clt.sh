@@ -2,9 +2,9 @@
 # Build FreeAudio.app with the Command Line Tools only (no Xcode needed).
 #
 #   ./scripts/build-app-clt.sh            # arm64 release build (macOS 27 runs only on Apple silicon)
-#   CODESIGN_IDENTITY="FreeAudio Dev" ./scripts/build-app-clt.sh
+#   CODESIGN_IDENTITY=- ./scripts/build-app-clt.sh   # force ad-hoc signing
 #
-# Output: build/FreeAudio.app (ad-hoc signed unless CODESIGN_IDENTITY is set)
+# Output: build/FreeAudio.app (signed with "FreeAudio Dev" if that certificate exists, else ad-hoc)
 #
 # Notes:
 # - The CLT toolchain ships without the SwiftUIMacros plugin, so `@State` can't be expanded
@@ -13,8 +13,9 @@
 #   The repository sources are never modified.
 # - Info.plist mirrors the INFOPLIST_KEY_* settings and `info:` properties in project.yml.
 # - Ad-hoc signatures change on every build, so macOS forgets the System Audio Recording and
-#   Accessibility grants each time. Signing with a stable local identity (e.g. a self-signed
-#   "FreeAudio Dev" code-signing certificate) keeps them across rebuilds.
+#   Accessibility grants each time. When a "FreeAudio Dev" code-signing certificate exists in the
+#   keychain (self-signed, local only) it is used instead, so the grants survive rebuilds.
+#   Release builds (build-dmg.sh) stay ad-hoc.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -24,7 +25,13 @@ APP="$BUILD/FreeAudio.app"
 SDK="$(xcrun --show-sdk-path)"
 ARCHS="${ARCHS:-arm64}"
 MIN_MACOS="27.0"
-CODESIGN_IDENTITY="${CODESIGN_IDENTITY:--}"
+if [ -z "${CODESIGN_IDENTITY:-}" ]; then
+  if security find-certificate -c "FreeAudio Dev" >/dev/null 2>&1; then
+    CODESIGN_IDENTITY="FreeAudio Dev"
+  else
+    CODESIGN_IDENTITY="-"
+  fi
+fi
 
 VERSION="$(sed -n 's/^ *MARKETING_VERSION: *"\{0,1\}\([^"]*\)"\{0,1\}$/\1/p' "$ROOT/project.yml")"
 BUILD_NUMBER="$(sed -n 's/^ *CURRENT_PROJECT_VERSION: *"\{0,1\}\([^"]*\)"\{0,1\}$/\1/p' "$ROOT/project.yml")"

@@ -25,15 +25,12 @@ final class TapService: ObservableObject, @unchecked Sendable {
 
     private var engines: [String: TapEngine] = [:]
     private var specs: [String: EngineSpec] = [:]
-    private var lastSeen: [String: Date] = [:]
     private var failureTimes: [String: Date] = [:]
     private var idleRestarts: [String: Date] = [:]
     private var cancellables: Set<AnyCancellable> = []
     private var watchdog: Timer?
     private var reconcileTask: Task<Void, Never>?
 
-    /// How long an engine outlives its app (a relaunch is followed by bundle ID meanwhile).
-    private static let appGoneGrace: TimeInterval = 30
     /// Silence after which an engine's IO is restarted so the Mac can sleep (spike S3).
     private static let idleRestartAfter: TimeInterval = 3
     /// A failed engine isn't retried for this long.
@@ -41,8 +38,18 @@ final class TapService: ObservableObject, @unchecked Sendable {
 
     func start() {
         guard cancellables.isEmpty else { return }
+        engineLog.notice("TapService started; System Audio Recording: \(String(describing: PermissionService.shared.status), privacy: .public)")
         AppAudioService.shared.$allApps
-            .sink { [weak self] _ in self?.scheduleReconcile() }
+            .sink { [weak self] apps in
+                guard let self else { return }
+                // A controlled app without an engine plays unprocessed until we act: skip the debounce.
+                let settings = SettingsService.shared
+                if apps.contains(where: { !settings.appSetting(for: $0.id).isDefault && self.specs[$0.id] == nil }) {
+                    Task { @MainActor in self.reconcile() }
+                } else {
+                    self.scheduleReconcile()
+                }
+            }
             .store(in: &cancellables)
         SettingsService.shared.$appSettings
             .sink { [weak self] _ in
@@ -77,7 +84,8 @@ final class TapService: ObservableObject, @unchecked Sendable {
     private func desiredSpecs() -> [String: EngineSpec] {
         let settings = SettingsService.shared
         let apps = AppAudioService.shared.allApps
-        let needsTaps = apps.contains { !settings.appSetting(for: $0.id).isDefault }
+        // Saved settings are never default, and their apps get (pre-armed) taps.
+        let needsTaps = !settings.appSettings.isEmpty
         let permission = PermissionService.shared
         if needsTaps, permission.status == .notDetermined { permission.requestIfNeeded() }
         guard permission.allowsTaps else {
@@ -93,7 +101,6 @@ final class TapService: ObservableObject, @unchecked Sendable {
         let outputUIDs = Set(DeviceService.shared.outputDevices.map(\.uid))
         var desired: [String: EngineSpec] = [:]
         for app in apps {
-            lastSeen[app.id] = now
             let setting = settings.appSetting(for: app.id)
             if let failed = failureTimes[app.id], now.timeIntervalSince(failed) < Self.failureBackoff { continue }
             if setting.isDefault {
@@ -106,27 +113,36 @@ final class TapService: ObservableObject, @unchecked Sendable {
                 }
                 continue
             }
+            let followed = EngineDiff.followedBundleIDs(appBundleID: app.bundleID, helperBundleIDs: app.helperBundleIDs)
+            // Remember helper IDs so the pre-armed tap covers them next time the app starts.
+            let helpers = followed.filter { $0 != app.bundleID }
+            if !Set(helpers).isSubset(of: Set(setting.helpers ?? [])) {
+                let merged = Array(Set(helpers).union(setting.helpers ?? [])).sorted()
+                Task { @MainActor in settings.updateAppSetting(app.id, name: nil) { $0.helpers = merged } }
+            }
             desired[app.id] = EngineSpec(
                 key: app.id,
                 kind: setting.muted ? .muteOnly : .app,
                 deviceUID: app.outputDeviceUIDs.first(where: outputUIDs.contains) ?? defaultUID,
                 processObjectIDs: app.processObjectIDs,
-                bundleIDs: EngineDiff.followedBundleIDs(appBundleID: app.bundleID, helperBundleIDs: app.helperBundleIDs),
+                bundleIDs: EngineDiff.followedBundleIDs(appBundleID: app.bundleID, helperBundleIDs: app.helperBundleIDs + (setting.helpers ?? [])),
                 gain: setting.gain)
         }
-        // An app that just quit keeps its engine for a while so the tap follows a relaunch by
-        // bundle ID. Its old process objects are dropped: Core Audio reuses object IDs, and a
-        // rebuilt tap must never pick up an unrelated process.
+        // Saved apps that aren't running get a pre-armed tap that follows their bundle ID, so
+        // they're controlled from their first sound (spike S5: an empty tap costs nothing and
+        // picks the app up when it starts). No process objects: Core Audio reuses object IDs,
+        // and a tap must never pick up an unrelated process. Plain executables (`exec:`) have no
+        // bundle ID to follow.
         let present = Set(apps.map(\.id))
-        for (key, spec) in specs where !present.contains(key) && !spec.bundleIDs.isEmpty {
-            let setting = settings.appSetting(for: key)
-            if !setting.isDefault, let seen = lastSeen[key], now.timeIntervalSince(seen) < Self.appGoneGrace {
-                var kept = spec
-                kept.processObjectIDs = []
-                kept.gain = setting.gain
-                kept.kind = setting.muted ? .muteOnly : .app
-                desired[key] = kept
-            }
+        for (key, setting) in settings.appSettings where !present.contains(key) && !key.hasPrefix("exec:") {
+            if let failed = failureTimes[key], now.timeIntervalSince(failed) < Self.failureBackoff { continue }
+            desired[key] = EngineSpec(
+                key: key,
+                kind: setting.muted ? .muteOnly : .app,
+                deviceUID: defaultUID,
+                processObjectIDs: [],
+                bundleIDs: EngineDiff.followedBundleIDs(appBundleID: key, helperBundleIDs: setting.helpers ?? []),
+                gain: setting.gain)
         }
         return desired
     }
@@ -134,7 +150,11 @@ final class TapService: ObservableObject, @unchecked Sendable {
     // MARK: - Applying
 
     func reconcile() {
-        apply(EngineDiff.actions(current: specs, desired: desiredSpecs()))
+        let actions = EngineDiff.actions(current: specs, desired: desiredSpecs())
+        if !actions.isEmpty {
+            engineLog.notice("reconcile: \(actions.count) action(s): \(String(describing: actions), privacy: .public)")
+        }
+        apply(actions)
     }
 
     private func apply(_ actions: [EngineAction]) {

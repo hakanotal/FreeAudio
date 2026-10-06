@@ -2,7 +2,7 @@
 
 Free, open-source SoundSource alternative: a macOS menu bar app for per-app volume and mute, output device control, software volume for outputs without hardware volume (HDMI/DisplayPort), and later per-app routing, EQ and profiles. UI in Turkish and English. Sibling of [FreeDisplay](https://github.com/hakanotal/FreeDisplay); same know-how, same visual style.
 
-**Status:** Phase 0 of [docs/ROADMAP.md](docs/ROADMAP.md) (display code stripped, toolchain set up; spikes next). **Start with the roadmap**: decisions, engine design, spikes, phases with acceptance checks. [docs/FREEAUDIO_BRIEF.md](docs/FREEAUDIO_BRIEF.md) keeps the background (Core Audio process taps, style guide); where the two differ, the roadmap wins.
+**Status:** Phases 0–2 of [docs/ROADMAP.md](docs/ROADMAP.md) are built (listing, device volume, per-app volume); Phase 3 (robustness) is next. **Start with the roadmap**: decisions, engine design, spikes, phases with acceptance checks. [docs/FREEAUDIO_BRIEF.md](docs/FREEAUDIO_BRIEF.md) keeps the background (Core Audio process taps, style guide); where the two differ, the roadmap wins.
 
 Swift 6 + SwiftUI (`MenuBarExtra`) + Core Audio process taps. **Minimum macOS 27, Apple silicon only (arm64).** No third-party dependencies. App Sandbox is off.
 
@@ -20,7 +20,7 @@ Swift 6 + SwiftUI (`MenuBarExtra`) + Core Audio process taps. **Minimum macOS 27
 xcodegen generate            # after adding/removing files or editing project.yml (XcodeGen is installed)
 ```
 
-Unit tests cover pure logic only (`FreeAudio/Core`, compiled into both the app and `Package.swift`). Per-app audio, device switching and volume keys must be checked on real hardware (built-in speakers, AirPods, the Dell over USB-C, a USB DAC). Ad-hoc signatures change every build, so macOS re-asks for System Audio Recording and Accessibility after each rebuild unless `CODESIGN_IDENTITY` names a stable local signing identity.
+Unit tests cover pure logic only (`FreeAudio/Core`, compiled into both the app and `Package.swift`). Per-app audio, device switching and volume keys must be checked on real hardware (built-in speakers, AirPods, the Dell over USB-C, a USB DAC). `build-app-clt.sh` signs with the local self-signed "FreeAudio Dev" certificate when it exists, so System Audio Recording and Accessibility grants survive rebuilds (ad-hoc signatures change every build). Launch with `open`, not from a shell: a process started from a terminal is judged by the terminal's permissions.
 
 ## Language
 

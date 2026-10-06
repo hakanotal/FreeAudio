@@ -35,7 +35,9 @@ final class AudioManager: ObservableObject, @unchecked Sendable {
             lines.append("  \(device.name)\(isDefault) uid=\(device.uid) transport=\(device.transport) hardwareVolume=\(device.hasHardwareVolume)")
         }
         lines.append("Default output volume: \(Int((volume.volume * 100).rounded()))% muted=\(volume.isMuted) canMute=\(volume.canMute) tier=\(volume.tier)")
-        lines.append("System Audio Recording: \(PermissionService.shared.status)")
+        // macOS judges a process started from a terminal by the terminal's grant, so this only
+        // reflects FreeAudio's own permission when FreeAudio was opened normally.
+        lines.append("System Audio Recording (this process): \(PermissionService.shared.status)")
         lines.append("")
         lines.append("Saved app settings: \(SettingsService.shared.appSettings.map { "\($0.key)=\(Int(($0.value.volume * 100).rounded()))%\($0.value.muted ? " muted" : "")\($0.value.boost > 1 ? " boost \($0.value.boost)" : "")" }.sorted())")
         lines.append("")
