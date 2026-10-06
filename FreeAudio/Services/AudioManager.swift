@@ -7,11 +7,13 @@ import Foundation
 final class AudioManager: ObservableObject, @unchecked Sendable {
     private var cancellables: Set<AnyCancellable> = []
 
-    func start() {
+    /// - Parameter engines: false for the read-only `--dump-audio` instance, which runs next to
+    ///   the normal one and must never create taps of its own.
+    func start(engines: Bool = true) {
         let devices = DeviceService.shared
         devices.start()
         AppAudioService.shared.start()
-        TapService.shared.start()
+        if engines { TapService.shared.start() }
 
         // Device volume follows the default output.
         devices.$outputDevices
@@ -35,8 +37,6 @@ final class AudioManager: ObservableObject, @unchecked Sendable {
         lines.append("Default output volume: \(Int((volume.volume * 100).rounded()))% muted=\(volume.isMuted) canMute=\(volume.canMute) tier=\(volume.tier)")
         lines.append("System Audio Recording: \(PermissionService.shared.status)")
         lines.append("")
-        lines.append("Tap engines (\(TapService.shared.state)):")
-        lines.append(contentsOf: TapService.shared.diagnostics())
         lines.append("Saved app settings: \(SettingsService.shared.appSettings.map { "\($0.key)=\(Int(($0.value.volume * 100).rounded()))%\($0.value.muted ? " muted" : "")\($0.value.boost > 1 ? " boost \($0.value.boost)" : "")" }.sorted())")
         lines.append("")
         lines.append("Audio clients grouped into apps (playing first):")

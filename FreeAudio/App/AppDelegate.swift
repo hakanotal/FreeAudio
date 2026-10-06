@@ -17,7 +17,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // `FreeAudio --dump-audio`: print a read-only diagnostics snapshot and quit. Runs next to
         // a normal instance, so it skips the single-instance check and the launch agent.
         if CommandLine.arguments.contains("--dump-audio") {
-            audioManager.start()
+            audioManager.start(engines: false)
             Task { @MainActor in
                 try? await Task.sleep(for: .milliseconds(500))
                 print(self.audioManager.diagnostics())
