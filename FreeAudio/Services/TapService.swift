@@ -1,6 +1,6 @@
+import AppKit
 import Combine
 import CoreAudio
-import Foundation
 
 /// Keeps one tap engine per controlled app. The main actor computes the desired engine set from
 /// apps, settings and permission (`desiredSpecs`), `EngineDiff` turns the difference into actions,
@@ -22,6 +22,9 @@ final class TapService: ObservableObject, @unchecked Sendable {
     /// Keys of apps with a running engine, and of apps whose engine failed to start.
     @Published private(set) var activeKeys: Set<String> = []
     @Published private(set) var failedKeys: Set<String> = []
+    /// Other tap-based audio apps that are running; taps from two processes on the same device
+    /// interfere (`AudioDeviceStart` can block until the other tap goes away).
+    @Published private(set) var conflictingApps: [String] = []
 
     private var engines: [String: TapEngine] = [:]
     private var specs: [String: EngineSpec] = [:]
@@ -30,11 +33,21 @@ final class TapService: ObservableObject, @unchecked Sendable {
     private var cancellables: Set<AnyCancellable> = []
     private var watchdog: Timer?
     private var reconcileTask: Task<Void, Never>?
+    private var lastDefaultUID: String?
+    private var previousDefaultUID: String?
+    private var defaultChangedAt: Date = .distantPast
+    private var workspaceObservers: [NSObjectProtocol] = []
+
+    /// After a default-output change, apps still reported on the old default follow the new one
+    /// for this long (their Devices property can lag behind the move).
+    private static let defaultFollowWindow: TimeInterval = 3
 
     /// Silence after which an engine's IO is restarted so the Mac can sleep (spike S3).
     private static let idleRestartAfter: TimeInterval = 3
     /// A failed engine isn't retried for this long.
     private static let failureBackoff: TimeInterval = 15
+    /// Linear crossfade when an engine is rebuilt on the same device.
+    private static let crossfadeSeconds = 0.05
 
     func start() {
         guard cancellables.isEmpty else { return }
@@ -58,7 +71,7 @@ final class TapService: ObservableObject, @unchecked Sendable {
             }
             .store(in: &cancellables)
         DeviceService.shared.$defaultOutputUID
-            .sink { [weak self] _ in self?.scheduleReconcile() }
+            .sink { [weak self] uid in self?.defaultOutputChanged(to: uid) }
             .store(in: &cancellables)
         PermissionService.shared.$status
             .sink { [weak self] _ in
@@ -67,6 +80,31 @@ final class TapService: ObservableObject, @unchecked Sendable {
             .store(in: &cancellables)
         watchdog = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.checkEngines() }
+        }
+        let center = NSWorkspace.shared.notificationCenter
+        for name in [NSWorkspace.didLaunchApplicationNotification, NSWorkspace.didTerminateApplicationNotification] {
+            workspaceObservers.append(center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.updateConflicts() }
+            })
+        }
+        updateConflicts()
+    }
+
+    /// The default output moved: re-read the apps right away (they follow the default) and
+    /// re-check once the follow window has passed.
+    private func defaultOutputChanged(to uid: String?) {
+        guard uid != lastDefaultUID else { return }
+        if lastDefaultUID != nil {
+            previousDefaultUID = lastDefaultUID
+            defaultChangedAt = Date()
+        }
+        lastDefaultUID = uid
+        Task { @MainActor in
+            AppAudioService.shared.refresh()
+            self.reconcile()
+            try? await Task.sleep(for: .seconds(Self.defaultFollowWindow + 0.2))
+            AppAudioService.shared.refresh()
+            self.reconcile()
         }
     }
 
@@ -99,6 +137,7 @@ final class TapService: ObservableObject, @unchecked Sendable {
         // Only real output devices: a tapped app's device list could include FreeAudio's own
         // private aggregate, and an engine must never target itself.
         let outputUIDs = Set(DeviceService.shared.outputDevices.map(\.uid))
+        let defaultChangedRecently = now.timeIntervalSince(defaultChangedAt) < Self.defaultFollowWindow
         var desired: [String: EngineSpec] = [:]
         for app in apps {
             let setting = settings.appSetting(for: app.id)
@@ -122,7 +161,8 @@ final class TapService: ObservableObject, @unchecked Sendable {
             }
             desired[app.id] = EngineSpec(
                 key: app.id,
-                deviceUID: app.outputDeviceUIDs.first(where: outputUIDs.contains) ?? defaultUID,
+                deviceUID: EngineDiff.outputDevice(appDeviceUIDs: app.outputDeviceUIDs, outputUIDs: outputUIDs, defaultUID: defaultUID,
+                                                   previousDefaultUID: previousDefaultUID, defaultChangedRecently: defaultChangedRecently),
                 processObjectIDs: app.processObjectIDs,
                 bundleIDs: EngineDiff.followedBundleIDs(appBundleID: app.bundleID, helperBundleIDs: app.helperBundleIDs + (setting.helpers ?? [])),
                 gain: Self.gain(for: setting))
@@ -183,14 +223,15 @@ final class TapService: ObservableObject, @unchecked Sendable {
                 specs[spec.key] = spec
                 launch(engine, replacing: old)
 
-            case .updateProcesses(let key, let objects):
+            case .updateTap(let key, let objects, let bundleIDs):
                 guard let engine = engines[key], var spec = specs[key] else { continue }
                 spec.processObjectIDs = objects
+                spec.bundleIDs = bundleIDs
                 specs[key] = spec
                 Task { @MainActor in
-                    let outcome = await HALQueue.shared.run { try engine.updateProcesses(objects) }
+                    let outcome = await HALQueue.shared.run { try engine.updateTap(processObjectIDs: objects, bundleIDs: bundleIDs) }
                     if case .failed(let message) = outcome {
-                        engineLog.error("\(key, privacy: .public): in-place process update failed (\(message, privacy: .public)), rebuilding")
+                        engineLog.error("\(key, privacy: .public): in-place tap update failed (\(message, privacy: .public)), rebuilding")
                         guard self.engines[key] === engine, let current = self.specs[key] else { return }
                         self.apply([.replace(current)])
                     } else if outcome == .timedOut {
@@ -208,14 +249,26 @@ final class TapService: ObservableObject, @unchecked Sendable {
     }
 
     /// Starts `engine`; once it runs, retires `old` (new before old, so the app is never heard
-    /// unprocessed in between).
+    /// unprocessed in between). On the same device both engines play the app for a moment, so
+    /// the new one starts silent and they cross over with host-time ramps (spike S3).
     private func launch(_ engine: TapEngine, replacing old: TapEngine?) {
         let key = engine.spec.key
+        let crossfade = old.map { $0.spec.deviceUID == engine.spec.deviceUID } ?? false
+        if crossfade { engine.setGain(0) }
         Task { @MainActor in
             let outcome = await HALQueue.shared.run { try engine.start() }
             switch outcome {
             case .done:
                 failureTimes.removeValue(forKey: key)
+                if crossfade, let old {
+                    // Start after the new engine's output gate has opened (40 ms fade on first sound).
+                    let start = HostClock.now + HostClock.ticks(0.1)
+                    let gain = specs[key]?.gain ?? engine.spec.gain
+                    engine.scheduleRamp(from: 0, to: gain, startHost: start, seconds: Self.crossfadeSeconds)
+                    // `gain` is also the old engine's current gain: gain changes go to both spec and engine.
+                    old.scheduleRamp(from: gain, to: 0, startHost: start, seconds: Self.crossfadeSeconds)
+                    try? await Task.sleep(for: .milliseconds(200))
+                }
                 if let layout = engine.layoutDescription { engineLog.debug("\(key, privacy: .public): \(layout, privacy: .public)") }
             case .failed(let message):
                 engineLog.error("\(key, privacy: .public): engine failed to start: \(message, privacy: .public)")
@@ -279,6 +332,52 @@ final class TapService: ObservableObject, @unchecked Sendable {
     }
 
     // MARK: - Recovery and shutdown
+
+    /// A device's sample rate changed: its aggregates went silent, so rebuild their engines.
+    func rebuildEngines(onDevice uid: String) {
+        let affected = specs.values.filter { $0.deviceUID == uid }
+        guard !affected.isEmpty else { return }
+        engineLog.notice("rebuilding \(affected.count) engine(s) on \(uid, privacy: .public)")
+        apply(affected.map { .replace($0) })
+    }
+
+    /// After wake, devices may have been reset: rebuild every engine once things settle, new
+    /// before old so controlled apps are never heard unprocessed.
+    func handleWake() {
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(1500))
+            engineLog.notice("rebuilding \(self.specs.count) engine(s) after wake")
+            DeviceService.shared.refresh()
+            AppAudioService.shared.refresh()
+            apply(specs.values.map { .replace($0) })
+            reconcile()
+        }
+    }
+
+    /// coreaudiod restarted: every tap and aggregate is gone. Drop them and build again.
+    func handleServiceRestart() {
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(500))
+            restartAll()
+        }
+    }
+
+    /// Known apps that also tap or reroute audio.
+    private static let conflictingBundleIDs: Set<String> = [
+        "com.rogueamoeba.soundsource", "com.rogueamoeba.audiohijack", "com.bitgapp.eqmac",
+        "com.bearisdriving.BGM.App", "com.finetuneapp.FineTune",
+    ]
+    private static let conflictingNames: Set<String> = ["FineTune", "MonitorKeys", "Mimir", "SonicFlow", "SoundSource", "eqMac"]
+
+    private func updateConflicts() {
+        let names = NSWorkspace.shared.runningApplications.compactMap { app -> String? in
+            if let id = app.bundleIdentifier, Self.conflictingBundleIDs.contains(id) { return app.localizedName ?? id }
+            if let name = app.localizedName, Self.conflictingNames.contains(name) { return name }
+            return nil
+        }
+        let sorted = Array(Set(names)).sorted()
+        if sorted != conflictingApps { conflictingApps = sorted }
+    }
 
     /// Tears every engine down and rebuilds from scratch ("Restart audio engine" in Settings).
     func restartAll() {

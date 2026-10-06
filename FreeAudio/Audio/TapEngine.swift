@@ -267,11 +267,16 @@ final class TapEngine: @unchecked Sendable {
         engineLog.info("\(self.spec.key, privacy: .public): disabled \(count - 1) device input stream(s) (\(status))")
     }
 
-    /// Replaces the tap's process list in place (spike S4).
-    func updateProcesses(_ processObjectIDs: [UInt32]) throws {
+    /// Replaces the tap's processes and followed bundle IDs in place (spike S4): new helpers join
+    /// a running tap without a rebuild.
+    func updateTap(processObjectIDs: [UInt32], bundleIDs: [String]) throws {
         guard let tap else { throw EngineError("no tap") }
         let description = try tap.description
         description.processes = processObjectIDs
+        if !bundleIDs.isEmpty {
+            description.bundleIDs = bundleIDs
+            description.isProcessRestoreEnabled = true
+        }
         try tap.setDescription(description)
     }
 

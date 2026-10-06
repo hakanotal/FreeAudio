@@ -31,6 +31,15 @@ struct AppListSection: View {
                 ) { TapService.shared.restartAll() }
             }
 
+            if !taps.conflictingApps.isEmpty, !taps.activeKeys.isEmpty {
+                NoticeRow(
+                    icon: "exclamationmark.triangle.fill", color: .yellow,
+                    text: L("\(taps.conflictingApps.joined(separator: ", ")) çalışıyor; uygulama ses düzeyleriyle çakışabilir.",
+                            "\(taps.conflictingApps.joined(separator: ", ")) is running and may interfere with per-app volume."),
+                    buttonTitle: L("Yeniden Başlat", "Restart")
+                ) { TapService.shared.restartAll() }
+            }
+
             if appAudio.apps.isEmpty {
                 Text(L("Şu anda ses çalan uygulama yok", "No apps are playing audio"))
                     .font(.caption)

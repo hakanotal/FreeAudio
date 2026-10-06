@@ -12,6 +12,9 @@ enum CoreAudioAddress {
     static let defaultSystemOutputDevice = PropertyAddress(kAudioHardwarePropertyDefaultSystemOutputDevice)
     static let processObjectList = PropertyAddress(kAudioHardwarePropertyProcessObjectList)
     static let processIsRunningOutput = PropertyAddress(kAudioProcessPropertyIsRunningOutput)
+    static let processOutputDevices = PropertyAddress(kAudioProcessPropertyDevices, scope: kAudioObjectPropertyScopeOutput)
+    static let serviceRestarted = PropertyAddress(kAudioHardwarePropertyServiceRestarted)
+    static let nominalSampleRate = PropertyAddress(kAudioDevicePropertyNominalSampleRate)
     /// Served by the HAL (the AudioHardwareService functions are deprecated); covers devices that
     /// only have per-channel volume controls.
     static let virtualMainVolume = PropertyAddress(kAudioHardwareServiceDeviceProperty_VirtualMainVolume, scope: kAudioObjectPropertyScopeOutput)
@@ -36,6 +39,13 @@ extension AudioHardwareObject {
 
     func setFloat32(_ value: Float32, _ address: AudioObjectPropertyAddress) throws {
         try setPropertyData(address: address, data: withUnsafeBytes(of: value) { Data($0) })
+    }
+
+    func float64(_ address: AudioObjectPropertyAddress) -> Float64? {
+        guard hasProperty(address: address),
+              let data = try? propertyData(address: address),
+              data.count >= MemoryLayout<Float64>.size else { return nil }
+        return data.withUnsafeBytes { $0.loadUnaligned(as: Float64.self) }
     }
 
     func uint32(_ address: AudioObjectPropertyAddress) -> UInt32? {

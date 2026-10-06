@@ -23,6 +23,27 @@ final class AudioManager: ObservableObject, @unchecked Sendable {
                 DeviceVolumeService.shared.bind(to: outputDevices.first { $0.uid == defaultUID })
             }
             .store(in: &cancellables)
+
+        guard engines else { return }
+        let taps = TapService.shared
+        devices.sampleRateChanged
+            .sink { uid in taps.rebuildEngines(onDevice: uid) }
+            .store(in: &cancellables)
+        devices.serviceRestarted
+            .sink { _ in
+                // Every object ID and listener died with coreaudiod.
+                DeviceService.shared.restartListeners()
+                AppAudioService.shared.restartListeners()
+                taps.handleServiceRestart()
+            }
+            .store(in: &cancellables)
+    }
+
+    /// Called by AppDelegate after the Mac wakes.
+    func handleWake() {
+        DeviceService.shared.refresh()
+        AppAudioService.shared.refresh()
+        TapService.shared.handleWake()
     }
 
     /// Plain-text snapshot of devices, volume and app grouping (`FreeAudio --dump-audio`).

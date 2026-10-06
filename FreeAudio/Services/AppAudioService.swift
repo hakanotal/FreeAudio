@@ -26,7 +26,7 @@ final class AppAudioService: ObservableObject, @unchecked Sendable {
     private var lastPlaying: [String: Date] = [:]
     private var icons: [String: NSImage] = [:]
     private var processListListener: PropertyListener?
-    private var runningListeners: [AudioObjectID: PropertyListener] = [:]
+    private var processListeners: [AudioObjectID: [PropertyListener]] = [:]
     private var pollTimer: Timer?
     private var refreshTask: Task<Void, Never>?
 
@@ -73,7 +73,7 @@ final class AppAudioService: ObservableObject, @unchecked Sendable {
                 outputDeviceUIDs: ((try? process.devices) ?? []).compactMap { try? $0.uid }
             ))
         }
-        updateRunningListeners(for: Set(processes.map(\.id)))
+        updateProcessListeners(for: Set(processes.map(\.id)))
 
         let grouped = AppGrouping.group(records, ownPID: ownPID, appForPID: Self.appInfo(forPID:), appForBundlePath: Self.appInfo(forBundlePath:))
         if grouped != allApps { allApps = grouped }
@@ -86,16 +86,26 @@ final class AppAudioService: ObservableObject, @unchecked Sendable {
         if visible != apps { apps = visible }
     }
 
-    /// One `IsRunningOutput` listener per process object, added and removed as processes come and go.
-    private func updateRunningListeners(for objectIDs: Set<AudioObjectID>) {
-        for id in runningListeners.keys where !objectIDs.contains(id) {
-            runningListeners.removeValue(forKey: id)?.cancel()
+    /// Per process object: `IsRunningOutput` (starts and stops) and output `Devices` (the app moved to
+    /// another device, e.g. after a default-output change). Added and removed as processes come and go.
+    private func updateProcessListeners(for objectIDs: Set<AudioObjectID>) {
+        for id in processListeners.keys where !objectIDs.contains(id) {
+            processListeners.removeValue(forKey: id)?.forEach { $0.cancel() }
         }
-        for id in objectIDs where runningListeners[id] == nil {
-            runningListeners[id] = PropertyListener(object: id, address: CoreAudioAddress.processIsRunningOutput) { [weak self] in
-                self?.scheduleRefresh()
+        for id in objectIDs where processListeners[id] == nil {
+            processListeners[id] = [CoreAudioAddress.processIsRunningOutput, CoreAudioAddress.processOutputDevices].compactMap { address in
+                PropertyListener(object: id, address: address) { [weak self] in self?.scheduleRefresh() }
             }
         }
+    }
+
+    /// Re-registers every listener (after coreaudiod restarted) and refreshes.
+    func restartListeners() {
+        processListListener?.cancel()
+        processListListener = nil
+        processListeners.values.forEach { $0.forEach { $0.cancel() } }
+        processListeners = [:]
+        start()
     }
 
     // MARK: - AppKit lookups

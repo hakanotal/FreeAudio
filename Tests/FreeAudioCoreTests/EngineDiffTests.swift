@@ -19,7 +19,12 @@ struct EngineDiffTests {
 
     @Test func newHelperUpdatesTheTapInPlace() {
         let actions = EngineDiff.actions(current: ["a": spec("a", processes: [1])], desired: ["a": spec("a", processes: [2, 1])])
-        #expect(actions == [.updateProcesses(key: "a", processObjectIDs: [2, 1])])
+        #expect(actions == [.updateTap(key: "a", processObjectIDs: [2, 1], bundleIDs: [])])
+    }
+
+    @Test func newFollowedBundleIDUpdatesTheTapInPlace() {
+        let actions = EngineDiff.actions(current: ["a": spec("a", bundleIDs: ["a"])], desired: ["a": spec("a", bundleIDs: ["a", "a.helper"])])
+        #expect(actions == [.updateTap(key: "a", processObjectIDs: [1], bundleIDs: ["a", "a.helper"])])
     }
 
     @Test func processOrderDoesNotMatter() {
@@ -27,9 +32,21 @@ struct EngineDiffTests {
         #expect(actions.isEmpty)
     }
 
-    @Test func deviceOrFollowedBundleIDsChangeReplaces() {
+    @Test func deviceChangeReplaces() {
         #expect(EngineDiff.actions(current: ["a": spec("a")], desired: ["a": spec("a", device: "dell")]) == [.replace(spec("a", device: "dell"))])
-        #expect(EngineDiff.actions(current: ["a": spec("a")], desired: ["a": spec("a", bundleIDs: ["a"])]) == [.replace(spec("a", bundleIDs: ["a"]))])
+    }
+
+    @Test func outputDeviceFollowsTheDefault() {
+        let outputs: Set<String> = ["speakers", "dell", "airpods"]
+        // No device reported, or not a real output (e.g. FreeAudio's own aggregate): the default.
+        #expect(EngineDiff.outputDevice(appDeviceUIDs: [], outputUIDs: outputs, defaultUID: "dell", previousDefaultUID: nil, defaultChangedRecently: false) == "dell")
+        #expect(EngineDiff.outputDevice(appDeviceUIDs: ["com.freeaudio.agg.x"], outputUIDs: outputs, defaultUID: "dell", previousDefaultUID: nil, defaultChangedRecently: false) == "dell")
+        // The app's own device.
+        #expect(EngineDiff.outputDevice(appDeviceUIDs: ["airpods"], outputUIDs: outputs, defaultUID: "dell", previousDefaultUID: "speakers", defaultChangedRecently: true) == "airpods")
+        // Still reported on the old default right after a switch: follows the new default.
+        #expect(EngineDiff.outputDevice(appDeviceUIDs: ["speakers"], outputUIDs: outputs, defaultUID: "dell", previousDefaultUID: "speakers", defaultChangedRecently: true) == "dell")
+        // Long after the switch, trust the app (it chose that device itself).
+        #expect(EngineDiff.outputDevice(appDeviceUIDs: ["speakers"], outputUIDs: outputs, defaultUID: "dell", previousDefaultUID: "speakers", defaultChangedRecently: false) == "speakers")
     }
 
     @Test func muteIsAGainChange() {

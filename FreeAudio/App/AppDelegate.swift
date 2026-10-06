@@ -5,6 +5,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Owned here rather than by a view, so audio work runs even if the menu panel is never
     /// opened (MenuBarExtra builds its content lazily).
     let audioManager: AudioManager
+    private var workspaceObservers: [NSObjectProtocol] = []
 
     override init() {
         // Must run before any service reads its defaults.
@@ -54,6 +55,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        workspaceObservers.forEach { NSWorkspace.shared.notificationCenter.removeObserver($0) }
         SettingsService.shared.flushAppSettings()
         // Destroy taps and aggregate devices before exiting (they'd also vanish with the process).
         TapService.shared.shutdown()
@@ -67,6 +69,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         SettingsService.shared.launchAtLogin = LaunchService.shared.isEnabled
 
         audioManager.start()
+
+        workspaceObservers.append(NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didWakeNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.audioManager.handleWake() }
+        })
     }
 
     private static func waitForTermination(of apps: [NSRunningApplication], timeout: TimeInterval) async {

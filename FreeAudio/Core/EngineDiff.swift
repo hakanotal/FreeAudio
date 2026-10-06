@@ -17,10 +17,11 @@ struct EngineSpec: Equatable, Sendable {
 
 enum EngineAction: Equatable, Sendable {
     case create(EngineSpec)
-    /// Device or followed bundle IDs changed: build the new engine, then remove the old one.
+    /// Output device changed: build the new engine, then remove the old one.
     case replace(EngineSpec)
-    /// Same engine, different processes: update the tap description in place (spike S4).
-    case updateProcesses(key: String, processObjectIDs: [UInt32])
+    /// Same device, different processes or followed bundle IDs: update the tap description in
+    /// place (spike S4), no rebuild.
+    case updateTap(key: String, processObjectIDs: [UInt32], bundleIDs: [String])
     /// Gain only: written to the engine's real-time state, no HAL work.
     case setGain(key: String, gain: Float)
     case destroy(key: String)
@@ -40,18 +41,33 @@ enum EngineDiff {
                 actions.append(.create(want))
                 continue
             }
-            if want.bundleIDs != have.bundleIDs || want.deviceUID != have.deviceUID {
+            if want.deviceUID != have.deviceUID {
                 actions.append(.replace(want))
                 continue
             }
-            if Set(want.processObjectIDs) != Set(have.processObjectIDs) {
-                actions.append(.updateProcesses(key: key, processObjectIDs: want.processObjectIDs))
+            if Set(want.processObjectIDs) != Set(have.processObjectIDs) || Set(want.bundleIDs) != Set(have.bundleIDs) {
+                actions.append(.updateTap(key: key, processObjectIDs: want.processObjectIDs, bundleIDs: want.bundleIDs))
             }
             if abs(want.gain - have.gain) > gainTolerance {
                 actions.append(.setGain(key: key, gain: want.gain))
             }
         }
         return actions
+    }
+
+    /// The device an app's engine plays to: the real output device the app uses, else the default.
+    /// Right after the default output changes, an app still reported on the previous default is
+    /// treated as following the default: macOS moves it, but its Devices property can lag.
+    static func outputDevice(
+        appDeviceUIDs: [String],
+        outputUIDs: Set<String>,
+        defaultUID: String,
+        previousDefaultUID: String?,
+        defaultChangedRecently: Bool
+    ) -> String {
+        guard let own = appDeviceUIDs.first(where: outputUIDs.contains) else { return defaultUID }
+        if defaultChangedRecently, own == previousDefaultUID { return defaultUID }
+        return own
     }
 
     /// Bundle IDs a tap may follow for an app: its own, plus helper IDs under its own prefix
