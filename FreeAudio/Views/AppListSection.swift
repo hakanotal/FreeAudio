@@ -4,6 +4,11 @@ import SwiftUI
 struct AppListSection: View {
     @ObservedObject private var appAudio = AppAudioService.shared
     @ObservedObject private var taps = TapService.shared
+    @ObservedObject private var settings = SettingsService.shared
+    @State private var showHidden = false
+
+    private var shownApps: [AudioApp] { appAudio.apps.filter { !settings.hiddenApps.contains($0.id) } }
+    private var hiddenApps: [AudioApp] { appAudio.apps.filter { settings.hiddenApps.contains($0.id) } }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -47,11 +52,69 @@ struct AppListSection: View {
                     .padding(.horizontal, 12)
                     .padding(.vertical, 7)
             } else {
-                ForEach(appAudio.apps) { app in
+                ForEach(shownApps) { app in
                     AppVolumeRow(app: app)
+                }
+                if shownApps.isEmpty {
+                    Text(L("Tüm açık uygulamalar gizli", "All open apps are hidden"))
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 7)
+                }
+            }
+
+            // Hidden apps: collapsed by default, with full controls when expanded.
+            if !hiddenApps.isEmpty {
+                HiddenAppsRow(count: hiddenApps.count, isExpanded: $showHidden)
+                if showHidden {
+                    VStack(spacing: 0) {
+                        ForEach(hiddenApps) { app in
+                            AppVolumeRow(app: app)
+                        }
+                    }
+                    .transition(.opacity.combined(with: .move(edge: .top)))
                 }
             }
         }
+    }
+}
+
+/// "Hidden apps (N)": expands to the apps hidden from the list.
+struct HiddenAppsRow: View {
+    let count: Int
+    @Binding var isExpanded: Bool
+    @State private var isHovered = false
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "eye.slash")
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .frame(width: 20)
+                .accessibilityHidden(true)
+            Text(L("Gizli uygulamalar (\(count))", "Hidden apps (\(count))"))
+                .font(.caption)
+                .foregroundColor(.secondary)
+            Spacer()
+            Image(systemName: "chevron.right")
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                .animation(.easeInOut(duration: 0.2), value: isExpanded)
+                .accessibilityHidden(true)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 5)
+        .background(Color.primary.opacity(isHovered ? 0.06 : 0))
+        .contentShape(Rectangle())
+        .onTapGesture {
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) { isExpanded.toggle() }
+        }
+        .onHover { isHovered = $0 }
+        .help(L("Gizlediğiniz uygulamalar; ayarları uygulanmaya devam eder", "Apps you've hidden; their settings still apply"))
+        .accessibilityLabel(L("Gizli uygulamalar, \(count)", "Hidden apps, \(count)"))
+        .accessibilityAddTraits(.isButton)
     }
 }
 
@@ -212,6 +275,20 @@ struct AppVolumeRow: View {
                 Label(L("Varsayılana döndür", "Reset to Default"), systemImage: "arrow.counterclockwise")
             }
             .disabled(setting.isDefault)
+            Divider()
+            if settings.hiddenApps.contains(app.id) {
+                Button {
+                    settings.setHidden(false, app: app.id)
+                } label: {
+                    Label(L("Göster", "Show"), systemImage: "eye")
+                }
+            } else {
+                Button {
+                    settings.setHidden(true, app: app.id)
+                } label: {
+                    Label(L("Gizle", "Hide"), systemImage: "eye.slash")
+                }
+            }
         }
     }
 
@@ -300,6 +377,14 @@ struct AppDetailView: View {
                     .foregroundColor(.secondary)
                     .lineLimit(2)
                 Spacer(minLength: 4)
+                let hidden = settings.hiddenApps.contains(app.id)
+                Button(hidden ? L("Göster", "Show") : L("Gizle", "Hide")) {
+                    settings.setHidden(!hidden, app: app.id)
+                }
+                .buttonStyle(.borderless)
+                .font(.caption)
+                .help(hidden ? L("Uygulamayı listeye geri getir", "Bring the app back into the list")
+                             : L("Uygulamayı listeden gizle; ayarları uygulanmaya devam eder", "Hide the app from the list; its settings still apply"))
                 Button(L("Sıfırla", "Reset")) {
                     settings.resetAppSetting(app.id)
                 }

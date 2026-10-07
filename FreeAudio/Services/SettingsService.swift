@@ -29,6 +29,7 @@ final class SettingsService: ObservableObject, @unchecked Sendable {
         static let launchAtLogin          = "fa.launchAtLogin"
         static let launchAtLoginPrompted  = "fa.launchAtLogin.prompted"
         static let checkUpdatesOnLaunch   = "fa.checkUpdatesOnLaunch"
+        static let hiddenApps             = "fa.hiddenApps"
         static let migrationVersion       = "fa.migrationVersion"
     }
 
@@ -41,6 +42,16 @@ final class SettingsService: ObservableObject, @unchecked Sendable {
     /// Whether the first-launch "enable Launch at Login?" prompt has been shown.
     @Published var launchAtLoginPrompted: Bool = false {
         didSet { defaults.set(launchAtLoginPrompted, forKey: Keys.launchAtLoginPrompted) }
+    }
+
+    /// App IDs (`AudioApp.id`) hidden from the app list. Purely visual: a hidden app keeps its
+    /// saved level, mute and output, and they are still applied.
+    @Published private(set) var hiddenApps: Set<String> = [] {
+        didSet { defaults.set(hiddenApps.sorted(), forKey: Keys.hiddenApps) }
+    }
+
+    func setHidden(_ hidden: Bool, app id: String) {
+        if hidden { hiddenApps.insert(id) } else { hiddenApps.remove(id) }
     }
 
     @Published var checkUpdatesOnLaunch: Bool = true {
@@ -194,6 +205,7 @@ final class SettingsService: ObservableObject, @unchecked Sendable {
         // This handles the case where the user toggled it externally or after a fresh install.
         launchAtLogin = LaunchService.shared.isEnabled
         launchAtLoginPrompted = defaults.bool(forKey: Keys.launchAtLoginPrompted)
+        hiddenApps = Set(defaults.stringArray(forKey: Keys.hiddenApps) ?? [])
         checkUpdatesOnLaunch = defaults.object(forKey: Keys.checkUpdatesOnLaunch) != nil
             ? defaults.bool(forKey: Keys.checkUpdatesOnLaunch) : true
     }
