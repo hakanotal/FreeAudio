@@ -8,6 +8,10 @@ FreeAudio is the sibling of [FreeDisplay](https://github.com/hakanotal/FreeDispl
 
 [Download Latest Release](https://github.com/hakanotal/FreeAudio/releases/latest) | [Report an Issue](https://github.com/hakanotal/FreeAudio/issues)
 
+<p align="center">
+  <img src="docs/screenshot.png" width="350" alt="FreeAudio menu bar panel: output device, per-app volume sliders, input and settings">
+</p>
+
 ---
 
 [!["Buy Me A Coffee"](https://www.buymeacoffee.com/assets/img/custom_images/orange_img.png)](https://buymeacoffee.com/hakantotal)
