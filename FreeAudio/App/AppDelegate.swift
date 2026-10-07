@@ -6,6 +6,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// opened (MenuBarExtra builds its content lazily).
     let audioManager: AudioManager
     private var workspaceObservers: [NSObjectProtocol] = []
+    private var audioStarted = false
 
     override init() {
         // Must run before any service reads its defaults.
@@ -66,9 +67,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func startServices() {
         // Migrate the old login item / hand a manual launch over to the launchd agent.
-        LaunchService.shared.prepareAtLaunch()
+        let handedOver = LaunchService.shared.prepareAtLaunch()
         SettingsService.shared.launchAtLogin = LaunchService.shared.isEnabled
 
+        if handedOver {
+            // The agent's instance replaces this one in a moment. Starting audio here would have
+            // two processes tap the same apps; only fall back if the hand-over didn't happen.
+            Task { @MainActor in
+                try? await Task.sleep(for: .seconds(6))
+                self.startAudio()
+            }
+            return
+        }
+        startAudio()
+    }
+
+    private func startAudio() {
+        guard !audioStarted else { return }
+        audioStarted = true
         audioManager.start()
 
         workspaceObservers.append(NSWorkspace.shared.notificationCenter.addObserver(

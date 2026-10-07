@@ -77,20 +77,24 @@ final class LaunchService: @unchecked Sendable {
     /// Called once at launch: migrates the old SMAppService login item to the agent, keeps the
     /// agent pointing at the current app location, and hands a manually opened copy over to
     /// launchd so crash restarts cover it.
-    func prepareAtLaunch() {
+    /// Returns true when this manually opened instance handed over to the launchd agent, whose
+    /// instance will replace it shortly.
+    @discardableResult
+    func prepareAtLaunch() -> Bool {
         if #available(macOS 13.0, *), SMAppService.mainApp.status == .enabled {
             try? SMAppService.mainApp.unregister()
-            enable()
-            return
+            return enable() && !Self.isManagedLaunch
         }
-        guard isEnabled else { return }
+        guard isEnabled else { return false }
         let moved = agentProgramPath() != Bundle.main.executablePath
         if moved {
             writeAgentPlist()
         }
         if !Self.isManagedLaunch {
             handOverToAgent(reload: moved)
+            return true
         }
+        return false
     }
 
     // MARK: - Helpers
