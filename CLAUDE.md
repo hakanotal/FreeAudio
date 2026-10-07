@@ -2,7 +2,7 @@
 
 Free, open-source SoundSource alternative: a macOS menu bar app for per-app volume and mute, output device control, software volume for outputs without hardware volume (HDMI/DisplayPort), and later per-app routing, EQ and profiles. UI in Turkish and English. Sibling of [FreeDisplay](https://github.com/hakanotal/FreeDisplay); same know-how, same visual style.
 
-**Status:** v1.0 = Phases 0–4 of [docs/ROADMAP.md](docs/ROADMAP.md) (per-app volume, output control, robustness, software volume and volume keys). Phase 5 (per-app output routing first) is next. **Start with the roadmap**: decisions, engine design, spikes, phases with acceptance checks. [docs/FREEAUDIO_BRIEF.md](docs/FREEAUDIO_BRIEF.md) keeps the background (Core Audio process taps, style guide); where the two differ, the roadmap wins.
+**Status:** v1.0 = Phases 0–4 of [docs/ROADMAP.md](docs/ROADMAP.md) (per-app volume, output control, robustness, software volume and volume keys). Phase 5 adds per-app routing, input device/level and reworked sliders; per-app EQ and profiles are out of scope (keep FreeAudio simple). **Start with the roadmap**: decisions, engine design, spikes, phases with acceptance checks. [docs/FREEAUDIO_BRIEF.md](docs/FREEAUDIO_BRIEF.md) keeps the background (Core Audio process taps, style guide); where the two differ, the roadmap wins.
 
 Swift 6 + SwiftUI (`MenuBarExtra`) + Core Audio process taps. **Minimum macOS 27, Apple silicon only (arm64).** No third-party dependencies. App Sandbox is off.
 

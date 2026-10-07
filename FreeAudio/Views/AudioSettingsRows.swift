@@ -148,9 +148,8 @@ struct SavedAppSettingRow: View {
     @State private var isHovered = false
 
     private var summary: String {
-        var parts = ["\(Int((setting.volume * 100).rounded()))%"]
+        var parts = ["\(Int(setting.level.rounded()))%"]
         if setting.muted { parts.append(L("sessiz", "muted")) }
-        if setting.boost > 1 { parts.append(L("güç \(Int(setting.boost * 100))%", "boost \(Int(setting.boost * 100))%")) }
         if setting.outputDeviceUID != nil { parts.append("→ " + (setting.outputDeviceName ?? L("aygıt", "device"))) }
         return parts.joined(separator: " · ")
     }

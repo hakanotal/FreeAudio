@@ -2,14 +2,9 @@ import Foundation
 
 /// Saved per-app audio settings, keyed by `AudioApp.id` (bundle ID, or `exec:<name>`).
 struct AppSetting: Codable, Equatable, Sendable {
-    /// Boost levels offered in the app detail (200% maximum).
-    static let boostLevels: [Double] = [1, 1.5, 2]
-
-    /// Slider position 0–1 (gain follows `VolumeCurve`).
-    var volume: Double = 1
+    /// App level in percent, 0–200 (100 = unchanged). Gain follows `VolumeCurve.appGain`.
+    var level: Double = 100
     var muted = false
-    /// Gain multiplier on top of the slider: 1, 1.5 or 2.
-    var boost: Double = 1
     /// Display name, so the saved-settings list can show apps that aren't running.
     var name: String?
     /// Helper bundle IDs seen for this app (e.g. `com.google.Chrome.helper`), so a tap prepared
@@ -20,11 +15,10 @@ struct AppSetting: Codable, Equatable, Sendable {
     /// That device's name, shown while it isn't connected.
     var outputDeviceName: String?
 
-    init(volume: Double = 1, muted: Bool = false, boost: Double = 1, name: String? = nil, helpers: [String]? = nil,
+    init(level: Double = 100, muted: Bool = false, name: String? = nil, helpers: [String]? = nil,
          outputDeviceUID: String? = nil, outputDeviceName: String? = nil) {
-        self.volume = volume
+        self.level = level
         self.muted = muted
-        self.boost = boost
         self.name = name
         self.helpers = helpers
         self.outputDeviceUID = outputDeviceUID
@@ -34,27 +28,33 @@ struct AppSetting: Codable, Equatable, Sendable {
     /// At default settings an app is left alone (no tap). A chosen output device needs a tap even
     /// at 100%.
     var isDefault: Bool {
-        volume >= 0.999 && !muted && boost <= 1.0001 && outputDeviceUID == nil
+        abs(level - 100) < 0.05 && !muted && outputDeviceUID == nil
     }
 
     /// Linear gain the engine applies.
     var gain: Float {
-        Float(VolumeCurve.gain(forSlider: volume) * boost)
+        Float(VolumeCurve.appGain(forPercent: level))
     }
 
     // Tolerant decoding: missing keys take defaults and bad values are clamped, so an older or
-    // hand-edited file never wipes the user's settings.
+    // hand-edited file never wipes the user's settings. v1.0 stored a slider `volume` (0–1) and a
+    // `boost` multiplier; they convert to the level with the same gain.
     private enum CodingKeys: String, CodingKey {
-        case volume, muted, boost, name, helpers, outputDeviceUID, outputDeviceName
+        case level, muted, name, helpers, outputDeviceUID, outputDeviceName
+        case volume, boost
     }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        let volume = (try? container.decodeIfPresent(Double.self, forKey: .volume)) ?? 1
-        self.volume = volume.isFinite ? min(max(volume, 0), 1) : 1
+        if let level = try? container.decodeIfPresent(Double.self, forKey: .level), level.isFinite {
+            self.level = min(max(level, 0), VolumeCurve.maxAppPercent)
+        } else {
+            let volume = (try? container.decodeIfPresent(Double.self, forKey: .volume)).flatMap { $0 } ?? 1
+            let boost = (try? container.decodeIfPresent(Double.self, forKey: .boost)).flatMap { $0 } ?? 1
+            let gain = VolumeCurve.gain(forSlider: volume.isFinite ? volume : 1) * (boost.isFinite ? max(boost, 1) : 1)
+            level = (VolumeCurve.appPercent(forGain: gain) * 10).rounded() / 10
+        }
         muted = (try? container.decodeIfPresent(Bool.self, forKey: .muted)) ?? false
-        let boost = (try? container.decodeIfPresent(Double.self, forKey: .boost)) ?? 1
-        self.boost = Self.boostLevels.min { abs($0 - boost) < abs($1 - boost) } ?? 1
         name = try? container.decodeIfPresent(String.self, forKey: .name)
         helpers = try? container.decodeIfPresent([String].self, forKey: .helpers)
         let device = try? container.decodeIfPresent(String.self, forKey: .outputDeviceUID)
@@ -81,5 +81,18 @@ struct AppSettingsFile: Codable, Equatable, Sendable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         version = (try? container.decodeIfPresent(Int.self, forKey: .version)) ?? Self.currentVersion
         apps = (try? container.decodeIfPresent([String: AppSetting].self, forKey: .apps)) ?? [:]
+    }
+}
+
+extension AppSetting {
+    /// Only the current keys are written (the old `volume`/`boost` keys are read-only).
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(level, forKey: .level)
+        try container.encode(muted, forKey: .muted)
+        try container.encodeIfPresent(name, forKey: .name)
+        try container.encodeIfPresent(helpers, forKey: .helpers)
+        try container.encodeIfPresent(outputDeviceUID, forKey: .outputDeviceUID)
+        try container.encodeIfPresent(outputDeviceName, forKey: .outputDeviceName)
     }
 }

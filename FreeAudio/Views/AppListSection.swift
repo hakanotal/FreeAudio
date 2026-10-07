@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Apps playing audio, each with its own volume, mute and boost.
+/// Apps playing audio, each with its own level (0–200%), mute and output.
 struct AppListSection: View {
     @ObservedObject private var appAudio = AppAudioService.shared
     @ObservedObject private var taps = TapService.shared
@@ -94,7 +94,8 @@ struct AppVolumeRow: View {
     let app: AudioApp
     @ObservedObject private var settings = SettingsService.shared
     @ObservedObject private var devices = DeviceService.shared
-    @State private var localVolume: Double = 1
+    /// Level in percent, 0–200 (100 = unchanged, in the middle of the slider).
+    @State private var localLevel: Double = 100
     @State private var isDragging = false
     @State private var isHovered = false
     @State private var isExpanded = false
@@ -116,10 +117,6 @@ struct AppVolumeRow: View {
                         .font(.body)
                         .lineLimit(1)
                         .truncationMode(.tail)
-                    if setting.boost > 1 {
-                        Badge(text: "\(Int(setting.boost * 100))%", color: .purple)
-                            .help(L("Güçlendirme açık", "Boost is on"))
-                    }
                     if let routedUID = setting.outputDeviceUID {
                         let device = devices.outputDevices.first { $0.uid == routedUID }
                         let name = device?.name ?? setting.outputDeviceName ?? routedUID
@@ -150,10 +147,10 @@ struct AppVolumeRow: View {
                 .help(setting.muted ? L("\(app.name) sesini aç", "Unmute \(app.name)") : L("\(app.name) sesini kapat", "Mute \(app.name)"))
                 .accessibilityLabel(setting.muted ? L("Sesi aç", "Unmute") : L("Sesi kapat", "Mute"))
 
-                Slider(value: $localVolume, in: 0...1) { editing in
+                VolumeSlider(percent: $localLevel, range: 0...VolumeCurve.maxAppPercent, neutralValue: 100) { editing in
                     isDragging = editing
                     if !editing {
-                        commit(localVolume)
+                        commit(localLevel)
                         withAnimation(.easeOut(duration: 0.3)) { valueHighlighted = true }
                         highlightTask?.cancel()
                         highlightTask = Task { @MainActor in
@@ -163,20 +160,21 @@ struct AppVolumeRow: View {
                     }
                 }
                 .controlSize(.small)
-                .frame(width: 92)
+                .frame(width: 112)
                 .opacity(setting.muted ? 0.5 : 1)
-                .onChange(of: localVolume) { _, newValue in
+                .onChange(of: localLevel) { _, newValue in
                     guard isDragging else { return }
                     commit(newValue)
                 }
                 .accessibilityLabel(L("\(app.name) ses düzeyi", "\(app.name) volume"))
-                .accessibilityValue("\(Int((localVolume * 100).rounded()))%")
-                .help(L("\(app.name) ses düzeyi", "\(app.name) volume"))
+                .accessibilityValue("\(Int(localLevel.rounded()))%")
+                .help(L("\(app.name) ses düzeyi: %100 değişmeden, %200'e kadar yükseltir",
+                        "\(app.name) volume: 100% is unchanged, up to 200% boosts it"))
 
-                Text("\(Int((localVolume * 100).rounded()))%")
+                Text("\(Int(localLevel.rounded()))%")
                     .font(.caption)
                     .foregroundColor(valueHighlighted ? .accentColor : .secondary)
-                    .frame(width: 34, alignment: .trailing)
+                    .frame(width: 36, alignment: .trailing)
                     .monospacedDigit()
                     .contentTransition(.numericText())
             }
@@ -190,9 +188,9 @@ struct AppVolumeRow: View {
                     .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
-        .onAppear { localVolume = setting.volume }
-        .onChange(of: setting.volume) { _, newValue in
-            if !isDragging, abs(newValue - localVolume) >= 0.005 { localVolume = newValue }
+        .onAppear { localLevel = setting.level }
+        .onChange(of: setting.level) { _, newValue in
+            if !isDragging, abs(newValue - localLevel) >= 0.5 { localLevel = newValue }
         }
         .contextMenu {
             Button {
@@ -212,7 +210,7 @@ struct AppVolumeRow: View {
 
     private func commit(_ value: Double) {
         settings.updateAppSetting(app.id, name: app.name) { setting in
-            setting.volume = value
+            setting.level = value
             // Moving the slider unmutes, like the system volume.
             if setting.muted, value > 0 { setting.muted = false }
         }
@@ -221,7 +219,7 @@ struct AppVolumeRow: View {
 
 // MARK: - AppDetailView
 
-/// Expanded panel under an app row: boost, reset and engine status.
+/// Expanded panel under an app row: output device, engine status and reset.
 struct AppDetailView: View {
     let app: AudioApp
     @ObservedObject private var settings = SettingsService.shared
@@ -285,25 +283,6 @@ struct AppDetailView: View {
                         "Send this app's audio to another output; while that device isn't connected the system default is used"))
             }
 
-            HStack(spacing: 6) {
-                Text(L("Güçlendirme", "Boost"))
-                    .font(.caption)
-                Spacer(minLength: 8)
-                Picker("", selection: Binding(
-                    get: { setting.boost },
-                    set: { value in settings.updateAppSetting(app.id, name: app.name) { $0.boost = value } }
-                )) {
-                    Text(L("Kapalı", "Off")).tag(1.0)
-                    Text(verbatim: "150%").tag(1.5)
-                    Text(verbatim: "200%").tag(2.0)
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .controlSize(.small)
-                .fixedSize()
-                .help(L("Sessiz uygulamaları %200'e kadar yükseltin", "Raise quiet apps up to 200%"))
-            }
-
             HStack(spacing: 4) {
                 Circle()
                     .fill(status.color)
@@ -320,7 +299,7 @@ struct AppDetailView: View {
                 .buttonStyle(.borderless)
                 .font(.caption)
                 .disabled(setting.isDefault)
-                .help(L("Ses düzeyini, sessizi ve güçlendirmeyi varsayılana döndür", "Reset volume, mute and boost to default"))
+                .help(L("Ses düzeyini, sessizi ve çıkışı varsayılana döndür", "Reset volume, mute and output to default"))
             }
         }
         .padding(.horizontal, 12)

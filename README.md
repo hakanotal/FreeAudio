@@ -2,7 +2,7 @@
 
 > **Free & open-source alternative to [SoundSource](https://rogueamoeba.com/soundsource/)**
 
-SoundSource is a great app, but it's paid. FreeAudio covers its most-used features in a free, open-source macOS menu bar app: a volume slider and mute for every app that plays sound, output device control, and working volume (and volume keys) for HDMI/DisplayPort monitors that macOS can't turn down. Turkish and English UI.
+SoundSource is a great app, but it's paid. FreeAudio covers its most-used features in a free, open-source macOS menu bar app: a volume slider and mute for every app that plays sound, output device control, and working volume (and volume keys) for HDMI/DisplayPort monitors that macOS can't turn down.
 
 FreeAudio is the sibling of [FreeDisplay](https://github.com/hakanotal/FreeDisplay) and shares its foundation and look.
 
@@ -10,15 +10,13 @@ FreeAudio is the sibling of [FreeDisplay](https://github.com/hakanotal/FreeDispl
 
 ---
 
-> maintained by [@hakanotal](https://github.com/hakanotal)
-
 [!["Buy Me A Coffee"](https://www.buymeacoffee.com/assets/img/custom_images/orange_img.png)](https://buymeacoffee.com/hakantotal)
 
 ---
 
 ## Features
 
-- **Per-app volume and mute** for every app playing audio, with boost up to 200%. Browser and Electron helper processes are grouped under their app.
+- **Per-app volume and mute** for every app playing audio: the app slider runs from 0 to 200%, with 100% (unchanged) in the middle. Sliders snap to 0, 25, 50, 75 and 100%. Browser and Electron helper processes are grouped under their app.
 - **Remembered per app:** settings apply from the app's first sound, also after a relaunch. Apps left at default are never touched.
 - **Output device:** switch outputs, set the output volume and mute.
 - **Software volume for monitors:** HDMI/DisplayPort outputs with no hardware volume get a working slider and mute, system sounds included.
@@ -36,14 +34,14 @@ See the [CHANGELOG](CHANGELOG.md) for details.
 |---------------------|:---------:|-------|
 | Per-app volume | ✅ | Slider per app, remembered by bundle ID |
 | Per-app mute | ✅ | Instant, click-free |
-| Volume boost | ✅ | 150% or 200%, with a soft limiter against clipping |
+| Volume boost | ✅ | App sliders go up to 200%, with a soft limiter against clipping |
 | Output device switching | ✅ | Alert sounds follow the output |
 | Output volume and mute | ✅ | Hardware volume where the device has it |
 | Volume for HDMI/DisplayPort outputs | ✅ | Software volume when macOS greys the slider out ("Use Software Volume" forces it) |
 | Volume keys for those outputs | ✅ | 16 steps, Option+Shift for finer steps, own volume HUD |
-| Per-app output routing | ⏳ | Planned next |
-| Per-app EQ | ⏳ | Planned |
-| Input device and level | ⏳ | Planned |
+| Per-app output routing | ✅ | Pick an output per app; falls back to the default while that device is away |
+| Input device and level | ✅ | Switch microphones, set the input level and mute |
+| Per-app EQ, profiles | ❌ | Not planned: FreeAudio stays simple |
 | Level meters | ⏳ | Planned |
 | Audio Unit effects | ❌ | Not planned |
 

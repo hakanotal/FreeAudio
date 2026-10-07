@@ -156,7 +156,8 @@ struct Badge: View {
 
 struct DeviceVolumeRow: View {
     @ObservedObject private var volume = DeviceVolumeService.shared
-    @State private var localVolume: Double = 1
+    /// Slider position in percent (0–100).
+    @State private var localPercent: Double = 100
     @State private var isDragging = false
     @State private var valueHighlighted = false
     @State private var highlightTask: Task<Void, Never>?
@@ -164,9 +165,9 @@ struct DeviceVolumeRow: View {
     private var isSoftware: Bool { volume.tier == .software }
 
     private var speakerIcon: String {
-        if volume.isMuted || localVolume == 0 { return "speaker.slash.fill" }
-        if localVolume < 0.34 { return "speaker.wave.1.fill" }
-        if localVolume < 0.67 { return "speaker.wave.2.fill" }
+        if volume.isMuted || localPercent == 0 { return "speaker.slash.fill" }
+        if localPercent < 34 { return "speaker.wave.1.fill" }
+        if localPercent < 67 { return "speaker.wave.2.fill" }
         return "speaker.wave.3.fill"
     }
 
@@ -205,10 +206,10 @@ struct DeviceVolumeRow: View {
                 .help(volume.isMuted ? L("Sesi aç", "Unmute") : L("Sesi kapat", "Mute"))
                 .accessibilityLabel(volume.isMuted ? L("Sesi aç", "Unmute") : L("Sesi kapat", "Mute"))
 
-                Slider(value: $localVolume, in: 0...1) { editing in
+                VolumeSlider(percent: $localPercent, range: 0...100) { editing in
                     isDragging = editing
                     if !editing {
-                        volume.setVolume(localVolume)
+                        volume.setVolume(localPercent / 100)
                         withAnimation(.easeOut(duration: 0.3)) { valueHighlighted = true }
                         highlightTask?.cancel()
                         highlightTask = Task { @MainActor in
@@ -217,12 +218,12 @@ struct DeviceVolumeRow: View {
                         }
                     }
                 }
-                .onChange(of: localVolume) { _, newValue in
+                .onChange(of: localPercent) { _, newValue in
                     guard isDragging else { return }
-                    volume.setVolume(newValue)
+                    volume.setVolume(newValue / 100)
                 }
                 .accessibilityLabel(L("Çıkış ses düzeyi", "Output volume"))
-                .accessibilityValue("\(Int((localVolume * 100).rounded()))%")
+                .accessibilityValue("\(Int(localPercent.rounded()))%")
                 .help(L("Ses düzeyini ayarlamak için sürükleyin", "Drag to adjust the volume"))
 
                 Image(systemName: "speaker.wave.3.fill")
@@ -231,7 +232,7 @@ struct DeviceVolumeRow: View {
                     .frame(width: 18)
                     .accessibilityHidden(true)
 
-                Text("\(Int((localVolume * 100).rounded()))%")
+                Text("\(Int(localPercent.rounded()))%")
                     .font(.caption)
                     .foregroundColor(valueHighlighted ? .accentColor : .secondary)
                     .frame(width: 36, alignment: .trailing)
@@ -241,11 +242,11 @@ struct DeviceVolumeRow: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 4)
         }
-        .onAppear { localVolume = volume.volume }
+        .onAppear { localPercent = volume.volume * 100 }
         .onChange(of: volume.volume) { _, newValue in
             // Pick up changes from the keyboard, System Settings or another app.
-            if !isDragging, abs(newValue - localVolume) >= 0.005 { localVolume = newValue }
+            if !isDragging, abs(newValue * 100 - localPercent) >= 0.5 { localPercent = newValue * 100 }
         }
-        .onChange(of: volume.deviceUID) { _, _ in localVolume = volume.volume }
+        .onChange(of: volume.deviceUID) { _, _ in localPercent = volume.volume * 100 }
     }
 }

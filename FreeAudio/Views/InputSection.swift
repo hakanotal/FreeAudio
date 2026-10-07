@@ -68,7 +68,8 @@ struct InputDeviceRow: View {
 
 struct InputLevelRow: View {
     @ObservedObject private var input = InputVolumeService.shared
-    @State private var localVolume: Double = 1
+    /// Input level in percent (0–100).
+    @State private var localPercent: Double = 100
     @State private var isDragging = false
     @State private var valueHighlighted = false
     @State private var highlightTask: Task<Void, Never>?
@@ -89,10 +90,10 @@ struct InputLevelRow: View {
                 .help(input.isMuted ? L("Mikrofonu aç", "Unmute microphone") : L("Mikrofonu kapat", "Mute microphone"))
                 .accessibilityLabel(input.isMuted ? L("Mikrofonu aç", "Unmute microphone") : L("Mikrofonu kapat", "Mute microphone"))
 
-                Slider(value: $localVolume, in: 0...1) { editing in
+                VolumeSlider(percent: $localPercent, range: 0...100) { editing in
                     isDragging = editing
                     if !editing {
-                        input.setVolume(localVolume)
+                        input.setVolume(localPercent / 100)
                         withAnimation(.easeOut(duration: 0.3)) { valueHighlighted = true }
                         highlightTask?.cancel()
                         highlightTask = Task { @MainActor in
@@ -102,16 +103,16 @@ struct InputLevelRow: View {
                     }
                 }
                 .disabled(!input.canSetVolume)
-                .onChange(of: localVolume) { _, newValue in
+                .onChange(of: localPercent) { _, newValue in
                     guard isDragging else { return }
-                    input.setVolume(newValue)
+                    input.setVolume(newValue / 100)
                 }
                 .accessibilityLabel(L("Giriş düzeyi", "Input level"))
-                .accessibilityValue("\(Int((localVolume * 100).rounded()))%")
+                .accessibilityValue("\(Int(localPercent.rounded()))%")
                 .help(input.canSetVolume ? L("Mikrofon giriş düzeyi", "Microphone input level")
                                          : L("Bu aygıtın giriş düzeyi ayarlanamıyor", "This device's input level can't be changed"))
 
-                Text("\(Int((localVolume * 100).rounded()))%")
+                Text("\(Int(localPercent.rounded()))%")
                     .font(.caption)
                     .foregroundColor(valueHighlighted ? .accentColor : .secondary)
                     .frame(width: 36, alignment: .trailing)
@@ -128,10 +129,10 @@ struct InputLevelRow: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
-        .onAppear { localVolume = input.volume }
+        .onAppear { localPercent = input.volume * 100 }
         .onChange(of: input.volume) { _, newValue in
-            if !isDragging, abs(newValue - localVolume) >= 0.005 { localVolume = newValue }
+            if !isDragging, abs(newValue * 100 - localPercent) >= 0.5 { localPercent = newValue * 100 }
         }
-        .onChange(of: input.deviceUID) { _, _ in localVolume = input.volume }
+        .onChange(of: input.deviceUID) { _, _ in localPercent = input.volume * 100 }
     }
 }

@@ -63,6 +63,8 @@ Hard-won constraints. Each one cost real debugging time; don't relearn them.
 
 ## SwiftUI / MenuBarExtra
 
+- The macOS 26 `Slider(… neutralValue: … ticks: { SliderTick(…) })` draws tick marks and fills from the neutral value, but the ticks don't snap. Snapping (and the haptic `NSHapticFeedbackManager` click) happens in the value binding (`VolumeSlider`, `SliderDetents`).
+
 - Custom content needs `.menuBarExtraStyle(.window)`. Hide the Dock icon with `INFOPLIST_KEY_LSUIElement: true`.
 - MenuBarExtra content is built lazily and its `.task`/`.onAppear` run on every panel open. Launch, wake and one-time work belongs in `AppDelegate`, and singletons whose init starts work must be touched at launch.
 - `NSWindow(contentRect:…, screen:)` treats the rect as relative to that screen. Pass global rects without `screen:`.
