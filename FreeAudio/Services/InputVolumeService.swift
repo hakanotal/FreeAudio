@@ -60,13 +60,24 @@ final class InputVolumeService: ObservableObject, @unchecked Sendable {
     func setVolume(_ value: Double) {
         guard canSetVolume, let device else { return }
         let clamped = min(max(value, 0), 1)
-        volume = clamped
-        try? device.setFloat32(Float32(clamped), CoreAudioAddress.inputVirtualMainVolume)
+        do {
+            try device.setFloat32(Float32(clamped), CoreAudioAddress.inputVirtualMainVolume)
+            volume = clamped
+        } catch {
+            engineLog.error("Setting the input level failed: \(error.localizedDescription, privacy: .public)")
+            read()
+        }
     }
 
+    /// Mutes the microphone. The UI shows what the device reports afterwards, never the request:
+    /// a failed write must not show a live microphone as muted.
     func setMuted(_ muted: Bool) {
         guard canMute, let device else { return }
-        isMuted = muted
-        try? device.setUInt32(muted ? 1 : 0, CoreAudioAddress.inputMute)
+        do {
+            try device.setUInt32(muted ? 1 : 0, CoreAudioAddress.inputMute)
+        } catch {
+            engineLog.error("Muting the input failed: \(error.localizedDescription, privacy: .public)")
+        }
+        read()
     }
 }

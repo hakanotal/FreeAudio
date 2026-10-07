@@ -147,7 +147,8 @@ final class DeviceService: ObservableObject, @unchecked Sendable {
         do {
             try system.setDefaultInputDevice(target)
         } catch {
-            NSLog("[DeviceService] Switching input to %@ failed: %@", device.name, error.localizedDescription)
+            // Device names can contain the user's name ("Hakan-iPhone Microphone"): keep them private.
+            engineLog.error("Switching input to \(device.name, privacy: .private) failed: \(error.localizedDescription, privacy: .public)")
         }
         refresh()
     }
@@ -165,7 +166,7 @@ final class DeviceService: ObservableObject, @unchecked Sendable {
                 try? system.setDefaultSoundEffectsDevice(target)
             }
         } catch {
-            NSLog("[DeviceService] Switching output to %@ failed: %@", device.name, error.localizedDescription)
+            engineLog.error("Switching output to \(device.name, privacy: .private) failed: \(error.localizedDescription, privacy: .public)")
         }
         refresh()
     }

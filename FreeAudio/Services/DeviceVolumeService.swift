@@ -115,18 +115,30 @@ final class DeviceVolumeService: ObservableObject, @unchecked Sendable {
             if clamped > 0 { isMuted = false }
             return
         }
-        try? device.setFloat32(Float32(clamped), CoreAudioAddress.virtualMainVolume)
+        do {
+            try device.setFloat32(Float32(clamped), CoreAudioAddress.virtualMainVolume)
+        } catch {
+            engineLog.error("Setting the output volume failed: \(error.localizedDescription, privacy: .public)")
+            read()
+            return
+        }
         if isMuted, clamped > 0 { setMuted(false) }
     }
 
     func setMuted(_ muted: Bool) {
         guard canMute, let device, let deviceUID else { return }
-        isMuted = muted
         if tier == .software {
+            isMuted = muted
             SettingsService.shared.updateDeviceSetting(deviceUID, name: deviceName) { $0.softwareMuted = muted }
             return
         }
-        try? device.setUInt32(muted ? 1 : 0, CoreAudioAddress.mute)
+        // Show what the device reports afterwards, not the request, in case the write fails.
+        do {
+            try device.setUInt32(muted ? 1 : 0, CoreAudioAddress.mute)
+        } catch {
+            engineLog.error("Muting the output failed: \(error.localizedDescription, privacy: .public)")
+        }
+        read()
     }
 
     /// Volume-key step on the software tier: `step` is a slider fraction (±1/16, or ±1/64 with
