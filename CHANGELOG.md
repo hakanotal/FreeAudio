@@ -7,6 +7,7 @@ All notable changes to FreeAudio are documented here.
 ## Unreleased
 
 - **Per-app output routing:** choose an output for any app in its detail view (click the app's name). The choice is remembered per app; while that device isn't connected the app plays on the system default and moves back when it returns. Routed apps show a small device icon next to their name, and apps routed to a monitor with software volume get that monitor's level
+- **Input device and level:** Tools → Input shows the current microphone; expand it to switch microphones and set the input level and mute (the slider is disabled for microphones whose level can't be changed). No extra permission needed
 
 ---
 

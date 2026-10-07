@@ -24,6 +24,15 @@ final class AudioManager: ObservableObject, @unchecked Sendable {
             }
             .store(in: &cancellables)
 
+        // Input level follows the default input.
+        devices.$inputDevices
+            .combineLatest(devices.$defaultInputUID)
+            .receive(on: RunLoop.main)
+            .sink { inputDevices, defaultUID in
+                InputVolumeService.shared.bind(to: inputDevices.first { $0.uid == defaultUID })
+            }
+            .store(in: &cancellables)
+
         guard engines else { return }
         startVolumeKeys()
         let taps = TapService.shared
@@ -93,6 +102,11 @@ final class AudioManager: ObservableObject, @unchecked Sendable {
         for device in devices.outputDevices {
             let isDefault = device.uid == devices.defaultOutputUID ? " [default]" : ""
             lines.append("  \(device.name)\(isDefault) uid=\(device.uid) transport=\(device.transport) hardwareVolume=\(device.hasHardwareVolume)")
+        }
+        lines.append("Input devices:")
+        for device in devices.inputDevices {
+            let isDefault = device.uid == devices.defaultInputUID ? " [default]" : ""
+            lines.append("  \(device.name)\(isDefault) uid=\(device.uid) transport=\(device.transport) settableLevel=\(device.hasHardwareVolume)")
         }
         lines.append("Default output volume: \(Int((volume.volume * 100).rounded()))% muted=\(volume.isMuted) canMute=\(volume.canMute) tier=\(volume.tier)")
         // macOS judges a process started from a terminal by the terminal's grant, so this only

@@ -85,6 +85,21 @@ struct MenuBarView: View {
                     .opacity(0.3)
                     .padding(.vertical, 2)
 
+                // Tools section header
+                Text(L("Araçlar", "Tools"))
+                    .font(.caption2)
+                    .fontWeight(.semibold)
+                    .foregroundColor(.secondary)
+                    .padding(.horizontal, 12)
+                    .padding(.top, 8)
+                    .padding(.bottom, 2)
+
+                InputSection()
+
+                Divider()
+                    .opacity(0.3)
+                    .padding(.vertical, 2)
+
                 // Settings section
                 ExpandableRow(
                     icon: "gearshape.fill",

@@ -21,6 +21,12 @@ enum CoreAudioAddress {
     static let volumeScalarMain = PropertyAddress(kAudioDevicePropertyVolumeScalar, scope: kAudioObjectPropertyScopeOutput)
     static let volumeScalarLeft = PropertyAddress(kAudioDevicePropertyVolumeScalar, scope: kAudioObjectPropertyScopeOutput, element: 1)
     static let mute = PropertyAddress(kAudioDevicePropertyMute, scope: kAudioObjectPropertyScopeOutput)
+    // Input side (microphones).
+    static let defaultInputDevice = PropertyAddress(kAudioHardwarePropertyDefaultInputDevice)
+    static let inputVirtualMainVolume = PropertyAddress(kAudioHardwareServiceDeviceProperty_VirtualMainVolume, scope: kAudioObjectPropertyScopeInput)
+    static let inputVolumeScalarMain = PropertyAddress(kAudioDevicePropertyVolumeScalar, scope: kAudioObjectPropertyScopeInput)
+    static let inputVolumeScalarLeft = PropertyAddress(kAudioDevicePropertyVolumeScalar, scope: kAudioObjectPropertyScopeInput, element: 1)
+    static let inputMute = PropertyAddress(kAudioDevicePropertyMute, scope: kAudioObjectPropertyScopeInput)
 }
 
 /// Small additions to the macOS 15+ Swift Core Audio object API.

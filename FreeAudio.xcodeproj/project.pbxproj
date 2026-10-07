@@ -11,6 +11,7 @@
 		0CA418EF7DCBD5299AB512B9 /* OutputDeviceSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 809FB46019D288BA335F72BC /* OutputDeviceSection.swift */; };
 		235C7940860C7DD29467B4E3 /* SettingsService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B8A3B1092A15A25947AC58E6 /* SettingsService.swift */; };
 		295E989498BF370EC64BA0FC /* PrivateAPI.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2CA82B08BE4E8AC55AA1A2D1 /* PrivateAPI.swift */; };
+		29EF95817563EFD70AC36199 /* InputSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F43C1AF94C89BB93D703D45 /* InputSection.swift */; };
 		3F957FDCCD4874925FA56609 /* PermissionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59175137BA39669ED77CCED1 /* PermissionService.swift */; };
 		406456D271B37C171C889F08 /* DeviceVolumeService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 224A5C9BA92ED53216BD1C12 /* DeviceVolumeService.swift */; };
 		45FD0E43C02B2555F71DBC97 /* UpdateService.swift in Sources */ = {isa = PBXBuildFile; fileRef = E43A9B3B851B5D9B4E07B7EE /* UpdateService.swift */; };
@@ -36,6 +37,7 @@
 		CA0F4CF2D0BE2C8505A12467 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 81520FBB10DFE9FEEE5D2F02 /* Assets.xcassets */; };
 		D234431EBB87F3AB51834410 /* MenuBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B396402B4D3659809C1E3D8 /* MenuBarView.swift */; };
 		EAAEDFBC5413702F92937296 /* RenderKernel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 240D0A39409C4B0D8C78E531 /* RenderKernel.swift */; };
+		F7FF453AA52D041177EA14AC /* InputVolumeService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C2619C120973F6C7D54DFB5 /* InputVolumeService.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -47,7 +49,9 @@
 		3535E833AD4C8180A9475385 /* EngineDiff.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EngineDiff.swift; sourceTree = "<group>"; };
 		3F77D56D2CE7F2E2AAF59C8D /* DeviceSetting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceSetting.swift; sourceTree = "<group>"; };
 		458572C175A26C2671406A89 /* LaunchService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LaunchService.swift; sourceTree = "<group>"; };
+		4F43C1AF94C89BB93D703D45 /* InputSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InputSection.swift; sourceTree = "<group>"; };
 		59175137BA39669ED77CCED1 /* PermissionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PermissionService.swift; sourceTree = "<group>"; };
+		5C2619C120973F6C7D54DFB5 /* InputVolumeService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InputVolumeService.swift; sourceTree = "<group>"; };
 		6885A27D791E24F540F03CFA /* AppGrouping.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppGrouping.swift; sourceTree = "<group>"; };
 		6AF06066CADFB4496A681F0C /* AudioSettingsRows.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioSettingsRows.swift; sourceTree = "<group>"; };
 		6B396402B4D3659809C1E3D8 /* MenuBarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarView.swift; sourceTree = "<group>"; };
@@ -79,6 +83,7 @@
 			children = (
 				94C22651E0A0A064A8BB2D58 /* AppListSection.swift */,
 				6AF06066CADFB4496A681F0C /* AudioSettingsRows.swift */,
+				4F43C1AF94C89BB93D703D45 /* InputSection.swift */,
 				6B396402B4D3659809C1E3D8 /* MenuBarView.swift */,
 				809FB46019D288BA335F72BC /* OutputDeviceSection.swift */,
 			);
@@ -119,6 +124,7 @@
 				6FA3D5272E535040F850AE72 /* AudioManager.swift */,
 				CAC3EFA2E467F2A499FB7115 /* DeviceService.swift */,
 				224A5C9BA92ED53216BD1C12 /* DeviceVolumeService.swift */,
+				5C2619C120973F6C7D54DFB5 /* InputVolumeService.swift */,
 				458572C175A26C2671406A89 /* LaunchService.swift */,
 				59175137BA39669ED77CCED1 /* PermissionService.swift */,
 				B8A3B1092A15A25947AC58E6 /* SettingsService.swift */,
@@ -258,6 +264,8 @@
 				9C7E42F5E651830BA959293C /* EngineDiff.swift in Sources */,
 				AC71AF9152CB06ED0C2116E8 /* FreeAudioApp.swift in Sources */,
 				A9CF8CB6E9C4B412D899C502 /* HALQueue.swift in Sources */,
+				29EF95817563EFD70AC36199 /* InputSection.swift in Sources */,
+				F7FF453AA52D041177EA14AC /* InputVolumeService.swift in Sources */,
 				4B02C02E19C64595BCCF8066 /* LaunchService.swift in Sources */,
 				D234431EBB87F3AB51834410 /* MenuBarView.swift in Sources */,
 				0CA418EF7DCBD5299AB512B9 /* OutputDeviceSection.swift in Sources */,

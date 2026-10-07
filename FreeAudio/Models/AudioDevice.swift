@@ -28,9 +28,19 @@ struct AudioDevice: Identifiable, Equatable, Sendable {
     let uid: String
     let name: String
     let transport: Transport
-    /// The device has a settable volume control. Without one (HDMI/DisplayPort monitors),
-    /// macOS greys out its volume and FreeAudio will provide software volume (Phase 4).
+    /// The device has a settable volume control in the listed direction. Without one
+    /// (HDMI/DisplayPort monitors), macOS greys out its volume and FreeAudio provides software
+    /// volume; for inputs, the level simply can't be changed.
     let hasHardwareVolume: Bool
+
+    /// SF Symbol for input device rows.
+    var inputSymbolName: String {
+        switch transport {
+        case .bluetooth: return symbolName
+        case .virtual, .aggregate: return "waveform"
+        default: return "mic.fill"
+        }
+    }
 
     /// SF Symbol for rows and menus.
     var symbolName: String {

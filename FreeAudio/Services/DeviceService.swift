@@ -10,6 +10,12 @@ final class DeviceService: ObservableObject, @unchecked Sendable {
 
     @Published private(set) var outputDevices: [AudioDevice] = []
     @Published private(set) var defaultOutputUID: String?
+    @Published private(set) var inputDevices: [AudioDevice] = []
+    @Published private(set) var defaultInputUID: String?
+
+    var defaultInput: AudioDevice? {
+        inputDevices.first { $0.uid == defaultInputUID }
+    }
 
     var defaultOutput: AudioDevice? {
         outputDevices.first { $0.uid == defaultOutputUID }
@@ -39,7 +45,7 @@ final class DeviceService: ObservableObject, @unchecked Sendable {
         }
         // Device list changes arrive in bursts (Bluetooth sends 2-3 within ~20 ms, and reading
         // the list mid-burst fails), so coalesce them.
-        for address in [CoreAudioAddress.devices, CoreAudioAddress.defaultOutputDevice] {
+        for address in [CoreAudioAddress.devices, CoreAudioAddress.defaultOutputDevice, CoreAudioAddress.defaultInputDevice] {
             if let listener = PropertyListener(object: system, address: address, handler: { [weak self] in
                 self?.scheduleRefresh()
             }) {
@@ -60,10 +66,15 @@ final class DeviceService: ObservableObject, @unchecked Sendable {
 
     func refresh() {
         let system = AudioHardwareSystem.shared
-        let devices = ((try? system.devices) ?? []).compactMap(Self.makeOutputDevice)
+        let all = (try? system.devices) ?? []
+        let devices = all.compactMap { Self.makeDevice($0, direction: .output) }
         if devices != outputDevices { outputDevices = devices }
         let defaultUID = try? system.defaultOutputDevice?.uid
         if defaultUID != defaultOutputUID { defaultOutputUID = defaultUID }
+        let inputs = all.compactMap { Self.makeDevice($0, direction: .input) }
+        if inputs != inputDevices { inputDevices = inputs }
+        let defaultInput = try? system.defaultInputDevice?.uid
+        if defaultInput != defaultInputUID { defaultInputUID = defaultInput }
         updateRateListeners()
     }
 
@@ -113,19 +124,32 @@ final class DeviceService: ObservableObject, @unchecked Sendable {
         }
     }
 
-    private static func makeOutputDevice(_ device: AudioHardwareDevice) -> AudioDevice? {
+    private static func makeDevice(_ device: AudioHardwareDevice, direction: AudioHardwareDirection) -> AudioDevice? {
         guard let uid = try? device.uid, !uid.hasPrefix(freeAudioAggregatePrefix),
               (try? device.isHidden) != true,
               (try? device.isAlive) != false,
-              ((try? device.streams) ?? []).contains(where: { (try? $0.direction) == .output })
+              ((try? device.streams) ?? []).contains(where: { (try? $0.direction) == direction })
         else { return nil }
+        let volumeAddress = direction == .output ? CoreAudioAddress.virtualMainVolume : CoreAudioAddress.inputVirtualMainVolume
         return AudioDevice(
             objectID: device.id,
             uid: uid,
             name: (try? device.name) ?? uid,
             transport: AudioDevice.Transport((try? device.transportType) ?? 0),
-            hasHardwareVolume: device.isSettable(CoreAudioAddress.virtualMainVolume)
+            hasHardwareVolume: device.isSettable(volumeAddress)
         )
+    }
+
+    /// Makes `device` the default input (microphone).
+    func setDefaultInput(_ device: AudioDevice) {
+        let system = AudioHardwareSystem.shared
+        guard let target = try? system.device(forUID: device.uid) else { return }
+        do {
+            try system.setDefaultInputDevice(target)
+        } catch {
+            NSLog("[DeviceService] Switching input to %@ failed: %@", device.name, error.localizedDescription)
+        }
+        refresh()
     }
 
     /// Makes `device` the default output. Alert sounds move with it when they were following the
