@@ -14,6 +14,15 @@ struct AppSettingTests {
         #expect(!AppSetting(boost: 1.5).isDefault)
     }
 
+    @Test func chosenOutputDeviceIsNotDefault() {
+        #expect(!AppSetting(outputDeviceUID: "airpods").isDefault)
+    }
+
+    @Test func emptyOutputDeviceDecodesAsSystemDefault() throws {
+        #expect(try decode(#"{"outputDeviceUID": ""}"#).outputDeviceUID == nil)
+        #expect(try decode(#"{"outputDeviceUID": "dell", "outputDeviceName": "DELL"}"#).outputDeviceUID == "dell")
+    }
+
     @Test func gainCombinesCurveAndBoost() {
         #expect(AppSetting(volume: 0.5).gain == 0.25)
         #expect(AppSetting(volume: 1, boost: 2).gain == 2)

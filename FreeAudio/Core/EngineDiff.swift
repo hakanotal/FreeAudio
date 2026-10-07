@@ -72,16 +72,19 @@ enum EngineDiff {
         return actions
     }
 
-    /// The device an app's engine plays to: the real output device the app uses, else the default.
-    /// Right after the default output changes, an app still reported on the previous default is
-    /// treated as following the default: macOS moves it, but its Devices property can lag.
+    /// The device an app's engine plays to: the device chosen for the app while it's connected;
+    /// otherwise the real output device the app uses, else the default. Right after the default
+    /// output changes, an app still reported on the previous default is treated as following the
+    /// default: macOS moves it, but its Devices property can lag.
     static func outputDevice(
+        routedUID: String? = nil,
         appDeviceUIDs: [String],
         outputUIDs: Set<String>,
         defaultUID: String,
         previousDefaultUID: String?,
         defaultChangedRecently: Bool
     ) -> String {
+        if let routedUID, outputUIDs.contains(routedUID) { return routedUID }
         guard let own = appDeviceUIDs.first(where: outputUIDs.contains) else { return defaultUID }
         if defaultChangedRecently, own == previousDefaultUID { return defaultUID }
         return own

@@ -178,7 +178,8 @@ final class TapService: ObservableObject, @unchecked Sendable {
             }
             desired[app.id] = EngineSpec(
                 key: app.id,
-                deviceUID: EngineDiff.outputDevice(appDeviceUIDs: app.outputDeviceUIDs, outputUIDs: outputUIDs, defaultUID: defaultUID,
+                deviceUID: EngineDiff.outputDevice(routedUID: setting.outputDeviceUID, appDeviceUIDs: app.outputDeviceUIDs,
+                                                   outputUIDs: outputUIDs, defaultUID: defaultUID,
                                                    previousDefaultUID: previousDefaultUID, defaultChangedRecently: defaultChangedRecently),
                 processObjectIDs: app.processObjectIDs,
                 bundleIDs: EngineDiff.followedBundleIDs(appBundleID: app.bundleID, helperBundleIDs: app.helperBundleIDs + (setting.helpers ?? [])),
@@ -194,12 +195,19 @@ final class TapService: ObservableObject, @unchecked Sendable {
             if let failed = failureTimes[key], now.timeIntervalSince(failed) < Self.failureBackoff { continue }
             desired[key] = EngineSpec(
                 key: key,
-                deviceUID: defaultUID,
+                deviceUID: setting.outputDeviceUID.flatMap { outputUIDs.contains($0) ? $0 : nil } ?? defaultUID,
                 processObjectIDs: [],
                 bundleIDs: EngineDiff.followedBundleIDs(appBundleID: key, helperBundleIDs: setting.helpers ?? []),
                 gain: Self.gain(for: setting))
         }
         addSoftwareVolume(to: &desired, device: defaultDevice, setting: defaultDeviceSetting, now: now)
+        // Apps routed to another software-volume device (e.g. an HDMI monitor that isn't the
+        // default) carry that device's level too. Only the default output gets a rest engine.
+        for device in DeviceService.shared.outputDevices where device.uid != defaultDevice?.uid {
+            let setting = settings.deviceSetting(for: device.uid)
+            guard (!device.hasHardwareVolume || setting.forceSoftware), !setting.isUnity else { continue }
+            SoftwareVolumePlan.applyDeviceGain(&desired, deviceUID: device.uid, deviceGain: setting.gain)
+        }
         return desired
     }
 

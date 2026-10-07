@@ -4,6 +4,12 @@ All notable changes to FreeAudio are documented here.
 
 ---
 
+## Unreleased
+
+- **Per-app output routing:** choose an output for any app in its detail view (click the app's name). The choice is remembered per app; while that device isn't connected the app plays on the system default and moves back when it returns. Routed apps show a small device icon next to their name, and apps routed to a monitor with software volume get that monitor's level
+
+---
+
 ## v1.0 (2026-10-06)
 
 First release. FreeAudio is a free, open-source menu bar app for per-app audio on macOS 27 (Apple silicon).

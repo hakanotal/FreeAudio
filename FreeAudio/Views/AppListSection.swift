@@ -93,6 +93,7 @@ struct NoticeRow: View {
 struct AppVolumeRow: View {
     let app: AudioApp
     @ObservedObject private var settings = SettingsService.shared
+    @ObservedObject private var devices = DeviceService.shared
     @State private var localVolume: Double = 1
     @State private var isDragging = false
     @State private var isHovered = false
@@ -118,6 +119,16 @@ struct AppVolumeRow: View {
                     if setting.boost > 1 {
                         Badge(text: "\(Int(setting.boost * 100))%", color: .purple)
                             .help(L("Güçlendirme açık", "Boost is on"))
+                    }
+                    if let routedUID = setting.outputDeviceUID {
+                        let device = devices.outputDevices.first { $0.uid == routedUID }
+                        let name = device?.name ?? setting.outputDeviceName ?? routedUID
+                        Image(systemName: device?.symbolName ?? "speaker.slash")
+                            .font(.caption2)
+                            .foregroundColor(device != nil ? .blue : .secondary)
+                            .help(device != nil ? L("Çıkış: \(name)", "Output: \(name)")
+                                                : L("Çıkış: \(name) (bağlı değil, sistem varsayılanı kullanılıyor)", "Output: \(name) (not connected, using the system default)"))
+                            .accessibilityLabel(L("Çıkış: \(name)", "Output: \(name)"))
                     }
                     Spacer(minLength: 4)
                 }
@@ -215,8 +226,14 @@ struct AppDetailView: View {
     let app: AudioApp
     @ObservedObject private var settings = SettingsService.shared
     @ObservedObject private var taps = TapService.shared
+    @ObservedObject private var devices = DeviceService.shared
 
     private var setting: AppSetting { settings.appSetting(for: app.id) }
+
+    private var routedDeviceMissing: Bool {
+        guard let uid = setting.outputDeviceUID else { return false }
+        return !devices.outputDevices.contains { $0.uid == uid }
+    }
 
     private var status: (text: String, color: Color) {
         if taps.failedKeys.contains(app.id) {
@@ -224,6 +241,10 @@ struct AppDetailView: View {
         }
         if setting.isDefault {
             return (L("Varsayılan: FreeAudio bu uygulamaya dokunmuyor", "Default: FreeAudio leaves this app alone"), .secondary)
+        }
+        if routedDeviceMissing {
+            let name = setting.outputDeviceName ?? L("Seçilen aygıt", "The chosen device")
+            return (L("\(name) bağlı değil; sistem varsayılanından çalıyor", "\(name) isn't connected; playing on the system default"), .orange)
         }
         if taps.activeKeys.contains(app.id) {
             return (setting.muted ? L("Sessize alındı", "Muted") : L("Ses FreeAudio üzerinden ayarlanıyor", "Volume is controlled by FreeAudio"), .green)
@@ -233,6 +254,37 @@ struct AppDetailView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Text(L("Çıkış", "Output"))
+                    .font(.caption)
+                Spacer(minLength: 8)
+                Picker("", selection: Binding<String>(
+                    get: { setting.outputDeviceUID ?? "" },
+                    set: { uid in
+                        let name = devices.outputDevices.first { $0.uid == uid }?.name
+                        settings.updateAppSetting(app.id, name: app.name) { setting in
+                            setting.outputDeviceUID = uid.isEmpty ? nil : uid
+                            setting.outputDeviceName = uid.isEmpty ? nil : name
+                        }
+                    }
+                )) {
+                    Text(L("Sistem varsayılanı", "System default")).tag("")
+                    Divider()
+                    ForEach(devices.outputDevices) { device in
+                        Text(device.name).tag(device.uid)
+                    }
+                    if routedDeviceMissing, let uid = setting.outputDeviceUID {
+                        Text(L("\(setting.outputDeviceName ?? uid) (bağlı değil)", "\(setting.outputDeviceName ?? uid) (not connected)")).tag(uid)
+                    }
+                }
+                .pickerStyle(.menu)
+                .labelsHidden()
+                .controlSize(.small)
+                .fixedSize()
+                .help(L("Bu uygulamanın sesini başka bir çıkışa gönderin; aygıt bağlı değilken sistem varsayılanı kullanılır",
+                        "Send this app's audio to another output; while that device isn't connected the system default is used"))
+            }
+
             HStack(spacing: 6) {
                 Text(L("Güçlendirme", "Boost"))
                     .font(.caption)

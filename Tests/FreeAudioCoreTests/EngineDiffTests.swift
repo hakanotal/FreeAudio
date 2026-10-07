@@ -45,6 +45,9 @@ struct EngineDiffTests {
         #expect(EngineDiff.outputDevice(appDeviceUIDs: ["airpods"], outputUIDs: outputs, defaultUID: "dell", previousDefaultUID: "speakers", defaultChangedRecently: true) == "airpods")
         // Still reported on the old default right after a switch: follows the new default.
         #expect(EngineDiff.outputDevice(appDeviceUIDs: ["speakers"], outputUIDs: outputs, defaultUID: "dell", previousDefaultUID: "speakers", defaultChangedRecently: true) == "dell")
+        // A device chosen for the app wins while it's connected; otherwise the usual rules apply.
+        #expect(EngineDiff.outputDevice(routedUID: "airpods", appDeviceUIDs: ["speakers"], outputUIDs: outputs, defaultUID: "dell", previousDefaultUID: nil, defaultChangedRecently: false) == "airpods")
+        #expect(EngineDiff.outputDevice(routedUID: "gone", appDeviceUIDs: [], outputUIDs: outputs, defaultUID: "dell", previousDefaultUID: nil, defaultChangedRecently: false) == "dell")
         // Long after the switch, trust the app (it chose that device itself).
         #expect(EngineDiff.outputDevice(appDeviceUIDs: ["speakers"], outputUIDs: outputs, defaultUID: "dell", previousDefaultUID: "speakers", defaultChangedRecently: false) == "speakers")
     }

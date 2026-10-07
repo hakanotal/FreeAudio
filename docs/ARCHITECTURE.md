@@ -56,6 +56,12 @@ Per-app volume: slider → SettingsService.updateAppSetting → TapService.recon
              → private stacked aggregate on the app's output device → C IOProc → AudioDeviceStart
            IOProc: RenderKernel (buffer mapping, 30 ms ramp, output gate, soft limiter)
 
+Routing:   AppSetting.outputDeviceUID (by UID) → the app's engine plays to that device while
+           it is connected (EngineDiff.outputDevice), otherwise it follows the default; a device
+           list change moves it back. Routed apps are controlled even at 100%, so they are
+           excluded from the default output's rest engine; on another software-volume device
+           their engine carries that device's gain
+
 Software volume: default output without hardware volume and below 100% → rest engine
            (exclusion tap scoped to the device: everything except FreeAudio and the controlled
            apps, by process object and bundle ID) at the device gain; app engines on that device

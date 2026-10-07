@@ -15,18 +15,26 @@ struct AppSetting: Codable, Equatable, Sendable {
     /// Helper bundle IDs seen for this app (e.g. `com.google.Chrome.helper`), so a tap prepared
     /// before the app runs already follows its helpers.
     var helpers: [String]?
+    /// Output device chosen for this app (device UID); nil follows the system default.
+    var outputDeviceUID: String?
+    /// That device's name, shown while it isn't connected.
+    var outputDeviceName: String?
 
-    init(volume: Double = 1, muted: Bool = false, boost: Double = 1, name: String? = nil, helpers: [String]? = nil) {
+    init(volume: Double = 1, muted: Bool = false, boost: Double = 1, name: String? = nil, helpers: [String]? = nil,
+         outputDeviceUID: String? = nil, outputDeviceName: String? = nil) {
         self.volume = volume
         self.muted = muted
         self.boost = boost
         self.name = name
         self.helpers = helpers
+        self.outputDeviceUID = outputDeviceUID
+        self.outputDeviceName = outputDeviceName
     }
 
-    /// At default settings an app is left alone (no tap).
+    /// At default settings an app is left alone (no tap). A chosen output device needs a tap even
+    /// at 100%.
     var isDefault: Bool {
-        volume >= 0.999 && !muted && boost <= 1.0001
+        volume >= 0.999 && !muted && boost <= 1.0001 && outputDeviceUID == nil
     }
 
     /// Linear gain the engine applies.
@@ -37,7 +45,7 @@ struct AppSetting: Codable, Equatable, Sendable {
     // Tolerant decoding: missing keys take defaults and bad values are clamped, so an older or
     // hand-edited file never wipes the user's settings.
     private enum CodingKeys: String, CodingKey {
-        case volume, muted, boost, name, helpers
+        case volume, muted, boost, name, helpers, outputDeviceUID, outputDeviceName
     }
 
     init(from decoder: Decoder) throws {
@@ -49,6 +57,9 @@ struct AppSetting: Codable, Equatable, Sendable {
         self.boost = Self.boostLevels.min { abs($0 - boost) < abs($1 - boost) } ?? 1
         name = try? container.decodeIfPresent(String.self, forKey: .name)
         helpers = try? container.decodeIfPresent([String].self, forKey: .helpers)
+        let device = try? container.decodeIfPresent(String.self, forKey: .outputDeviceUID)
+        outputDeviceUID = (device?.isEmpty ?? true) ? nil : device
+        outputDeviceName = try? container.decodeIfPresent(String.self, forKey: .outputDeviceName)
     }
 }
 
