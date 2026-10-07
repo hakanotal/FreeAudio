@@ -7,6 +7,7 @@ All notable changes to FreeAudio are documented here.
 ## Unreleased
 
 - **Per-app output routing:** choose an output for any app in its detail view (click the app's name). The choice is remembered per app; while that device isn't connected the app plays on the system default and moves back when it returns. Routed apps show a small device icon next to their name, and apps routed to a monitor with software volume get that monitor's level
+- **All open apps that play sound are listed,** not only the ones playing right now, so you can set an app's level before it makes a sound. Idle apps have a dimmed icon; playing apps show a small waveform. Background processes (system services, menu bar helpers, command-line tools) still only appear while they play
 - **Easier sliders:** every volume slider snaps to 0, 25, 50, 75 and 100% (with a light haptic click on Force Touch trackpads) and shows tick marks there
 - **App sliders run from 0 to 200%** with 100% (unchanged) in the middle, so boosting is just dragging past the middle; the separate boost picker is gone. Saved v1.0 settings convert to the same loudness. The output and input sliders stay 0–100%
 - **Input device and level:** Tools → Input shows the current microphone; expand it to switch microphones and set the input level and mute (the slider is disabled for microphones whose level can't be changed). No extra permission needed

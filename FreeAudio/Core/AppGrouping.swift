@@ -46,6 +46,8 @@ enum AppGrouping {
         "systemsoundserverd", "com.apple.audiomxd", "com.apple.coreaudiod", "com.apple.PowerChime",
         "com.apple.CoreSpeech", "com.apple.assistantd", "com.apple.accessibility.heard",
         "com.apple.SpeechRecognitionCore.speechrecognitiond", "com.apple.mediaremoted",
+        // FreeAudio itself, including another copy (e.g. a `--dump-audio` run): never listed or tapped.
+        "com.freeaudio.app",
     ]
     static let excludedBundleIDPrefixes = ["com.apple.siri", "com.apple.dictation", "com.apple.speech"]
     static let excludedExecutables: Set<String> = ["coreaudiod", "systemsoundserverd", "audiomxd", "corespeechd"]

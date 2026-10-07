@@ -7,7 +7,8 @@ final class AppAudioService: ObservableObject, @unchecked Sendable {
     static let shared = AppAudioService()
     private init() {}
 
-    /// Apps playing audio (or that stopped less than `rowGrace` ago), sorted by name.
+    /// The app list: every open regular app (with a Dock presence) that is an audio client, playing
+    /// or not, plus background processes while they play (and `rowGrace` after). Sorted by name.
     @Published private(set) var apps: [AudioApp] = []
     /// Every grouped audio client, playing or not. `TapService` follows this list.
     @Published private(set) var allApps: [AudioApp] = []
@@ -79,8 +80,16 @@ final class AppAudioService: ObservableObject, @unchecked Sendable {
         if grouped != allApps { allApps = grouped }
         let now = Date()
         for app in grouped where app.isPlaying { lastPlaying[app.id] = now }
+        // Regular apps that have connected to the audio system stay listed while they're open, so
+        // their level can be set before they make a sound. Daemons, menu bar agents and CLI tools
+        // (Control Center, dictation, afplay...) only show while they play, or they'd clutter it.
+        let regularApps = Set(NSWorkspace.shared.runningApplications
+            .filter { $0.activationPolicy == .regular }
+            .compactMap(\.bundleIdentifier))
         let visible = grouped.filter { app in
-            app.isPlaying || lastPlaying[app.id].map { now.timeIntervalSince($0) < Self.rowGrace } == true
+            app.isPlaying
+                || app.bundleID.map(regularApps.contains) == true
+                || lastPlaying[app.id].map { now.timeIntervalSince($0) < Self.rowGrace } == true
         }
         lastPlaying = lastPlaying.filter { now.timeIntervalSince($0.value) < Self.rowGrace }
         if visible != apps { apps = visible }

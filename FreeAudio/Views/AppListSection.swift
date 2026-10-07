@@ -41,7 +41,7 @@ struct AppListSection: View {
             }
 
             if appAudio.apps.isEmpty {
-                Text(L("Şu anda ses çalan uygulama yok", "No apps are playing audio"))
+                Text(L("Ses çalabilecek açık uygulama yok", "No open apps that play sound"))
                     .font(.caption)
                     .foregroundColor(.secondary)
                     .padding(.horizontal, 12)
@@ -111,12 +111,19 @@ struct AppVolumeRow: View {
                     Image(nsImage: AppAudioService.shared.icon(for: app))
                         .resizable()
                         .frame(width: 20, height: 20)
-                        .opacity(app.isPlaying ? 1 : 0.6)
+                        .opacity(app.isPlaying ? 1 : 0.55)
                         .accessibilityHidden(true)
                     Text(app.name)
                         .font(.body)
                         .lineLimit(1)
                         .truncationMode(.tail)
+                    if app.isPlaying {
+                        Image(systemName: "waveform")
+                            .font(.caption2)
+                            .foregroundColor(.accentColor)
+                            .help(L("Ses çalıyor", "Playing audio"))
+                            .accessibilityLabel(L("Ses çalıyor", "Playing audio"))
+                    }
                     if let routedUID = setting.outputDeviceUID {
                         let device = devices.outputDevices.first { $0.uid == routedUID }
                         let name = device?.name ?? setting.outputDeviceName ?? routedUID

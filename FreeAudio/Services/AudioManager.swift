@@ -115,6 +115,8 @@ final class AudioManager: ObservableObject, @unchecked Sendable {
         lines.append("")
         lines.append("Saved app settings: \(SettingsService.shared.appSettings.map { "\($0.key)=\(Int($0.value.level.rounded()))%\($0.value.muted ? " muted" : "")\($0.value.outputDeviceUID.map { " → \($0)" } ?? "")" }.sorted())")
         lines.append("")
+        lines.append("Listed in the panel: \(AppAudioService.shared.apps.map { $0.isPlaying ? "\($0.name) ▶" : $0.name })")
+        lines.append("")
         lines.append("Audio clients grouped into apps (playing first):")
         let apps = AppAudioService.shared.allApps.sorted { ($0.isPlaying ? 0 : 1, $0.name) < ($1.isPlaying ? 0 : 1, $1.name) }
         for app in apps {

@@ -76,6 +76,7 @@ struct AppGroupingTests {
             Self.record(50, pid: 600, bundleID: "systemsoundserverd", path: "/usr/sbin/systemsoundserverd"),
             Self.record(51, pid: 601, bundleID: "com.apple.siri.embeddedspeech", path: "/System/Library/x"),
             Self.record(52, pid: 1, bundleID: "com.freeaudio.app", path: "/Applications/FreeAudio.app/Contents/MacOS/FreeAudio"),
+            Self.record(53, pid: 2, bundleID: "com.freeaudio.app", path: "/Applications/FreeAudio.app/Contents/MacOS/FreeAudio"),
         ], ownPID: 1)
         #expect(result.isEmpty)
     }
