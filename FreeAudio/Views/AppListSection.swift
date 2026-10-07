@@ -205,6 +205,12 @@ struct AppVolumeRow: View {
                 }
                 .help(L("Ayrıntılar için tıklayın", "Click for details"))
 
+                // Hide/Show and Reset appear while the pointer is over the row.
+                if isHovered {
+                    AppRowActions(app: app)
+                        .transition(.opacity)
+                }
+
                 Button {
                     settings.updateAppSetting(app.id, name: app.name) { $0.muted.toggle() }
                 } label: {
@@ -251,7 +257,9 @@ struct AppVolumeRow: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 5)
             .background(Color.primary.opacity(isHovered ? 0.06 : 0))
-            .onHover { isHovered = $0 }
+            .onHover { hovering in
+                withAnimation(.easeInOut(duration: 0.12)) { isHovered = hovering }
+            }
 
             if isExpanded {
                 AppDetailView(app: app)
@@ -298,6 +306,55 @@ struct AppVolumeRow: View {
             // Moving the slider unmutes, like the system volume.
             if setting.muted, value > 0 { setting.muted = false }
         }
+    }
+}
+
+// MARK: - AppRowActions
+
+/// Small icon buttons shown on a hovered app row: Hide (or Show for a hidden app) and, when the app
+/// has non-default settings, Reset.
+struct AppRowActions: View {
+    let app: AudioApp
+    @ObservedObject private var settings = SettingsService.shared
+
+    var body: some View {
+        let hidden = settings.hiddenApps.contains(app.id)
+        HStack(spacing: 4) {
+            if !settings.appSetting(for: app.id).isDefault {
+                RowIconButton(systemName: "arrow.counterclockwise",
+                              help: L("Varsayılana döndür (%100, sessiz değil, sistem çıkışı)", "Reset to default (100%, unmuted, system output)")) {
+                    settings.resetAppSetting(app.id)
+                }
+            }
+            RowIconButton(systemName: hidden ? "eye" : "eye.slash",
+                          help: hidden ? L("Listede göster", "Show in the list")
+                                       : L("Listeden gizle (ayarları uygulanmaya devam eder)", "Hide from the list (its settings still apply)")) {
+                settings.setHidden(!hidden, app: app.id)
+            }
+        }
+    }
+}
+
+/// A small borderless icon button that highlights on hover.
+struct RowIconButton: View {
+    let systemName: String
+    let help: String
+    let action: () -> Void
+    @State private var isHovered = false
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundColor(isHovered ? .primary : .secondary)
+                .frame(width: 18, height: 18)
+                .background(RoundedRectangle(cornerRadius: 4).fill(Color.primary.opacity(isHovered ? 0.1 : 0)))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovered = $0 }
+        .help(help)
+        .accessibilityLabel(help)
     }
 }
 
@@ -377,14 +434,6 @@ struct AppDetailView: View {
                     .foregroundColor(.secondary)
                     .lineLimit(2)
                 Spacer(minLength: 4)
-                let hidden = settings.hiddenApps.contains(app.id)
-                Button(hidden ? L("Göster", "Show") : L("Gizle", "Hide")) {
-                    settings.setHidden(!hidden, app: app.id)
-                }
-                .buttonStyle(.borderless)
-                .font(.caption)
-                .help(hidden ? L("Uygulamayı listeye geri getir", "Bring the app back into the list")
-                             : L("Uygulamayı listeden gizle; ayarları uygulanmaya devam eder", "Hide the app from the list; its settings still apply"))
                 Button(L("Sıfırla", "Reset")) {
                     settings.resetAppSetting(app.id)
                 }
