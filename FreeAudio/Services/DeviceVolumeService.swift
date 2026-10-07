@@ -30,15 +30,16 @@ final class DeviceVolumeService: ObservableObject, @unchecked Sendable {
     private var listeners: [PropertyListener] = []
     private var rereadTask: Task<Void, Never>?
 
-    /// Follows `device` (the default output). Safe to call repeatedly with the same device.
-    func bind(to audioDevice: AudioDevice?) {
+    /// Follows `device` (the default output). Safe to call repeatedly with the same device;
+    /// `force` re-registers the listeners anyway.
+    func bind(to audioDevice: AudioDevice?, force: Bool = false) {
         if cancellables.isEmpty {
             // Software volume and the override live in settings.
             SettingsService.shared.$deviceSettings
                 .sink { [weak self] _ in Task { @MainActor in self?.applyTier(); self?.read() } }
                 .store(in: &cancellables)
         }
-        guard audioDevice?.uid != deviceUID || audioDevice?.objectID != device?.id else { return }
+        guard force || audioDevice?.uid != deviceUID || audioDevice?.objectID != device?.id else { return }
         listeners.forEach { $0.cancel() }
         listeners = []
         rereadTask?.cancel()
@@ -74,11 +75,16 @@ final class DeviceVolumeService: ObservableObject, @unchecked Sendable {
         }
     }
 
+    /// coreaudiod restarted: its listeners are gone even when the device kept its object ID.
+    func rebind() {
+        bind(to: DeviceService.shared.defaultOutput, force: true)
+    }
+
     /// Software when the device has no settable volume control or the user forced it.
     private func applyTier() {
         guard let deviceUID else { return }
-        let forced = SettingsService.shared.deviceSetting(for: deviceUID).forceSoftware
-        let newTier: Tier = hasHardwareVolume && !forced ? .hardware : .software
+        let software = SettingsService.shared.deviceSetting(for: deviceUID).usesSoftwareVolume(hasHardwareVolume: hasHardwareVolume)
+        let newTier: Tier = software ? .software : .hardware
         if newTier != tier { tier = newTier }
     }
 

@@ -16,30 +16,33 @@ enum HostClock {
 
 /// One serial queue for all HAL setup and teardown (tap, aggregate, IOProc), so a teardown
 /// always finishes before the next creation starts. HAL calls can block (another process's tap
-/// on the same device, `AudioDeviceDestroyIOProcID` waiting for a cycle), so every operation has
-/// a timeout. A timed-out call keeps running on the queue; the caller reports the engine as stuck
-/// instead of retrying.
+/// on the same device, a device that is still waking up, `AudioDeviceDestroyIOProcID` waiting
+/// for a cycle). Callers always get the real outcome, however long it takes, so they never act
+/// on a guess (e.g. retire an old engine while its replacement is still starting); `busySeconds`
+/// lets them show a "stuck" notice meanwhile.
 final class HALQueue: @unchecked Sendable {
     static let shared = HALQueue()
 
     enum Outcome: Sendable, Equatable {
         case done
         case failed(String)
-        case timedOut
     }
 
     private let queue = DispatchQueue(label: "com.freeaudio.hal", qos: .userInitiated)
+    /// Host time at which the running work item started; 0 while the queue is idle.
+    private let runningSince = Atomic<UInt64>(0)
 
-    /// Resumes a continuation at most once (work vs. timeout).
-    private final class Once: Sendable {
-        private let claimed = Atomic<Bool>(false)
-        func claim() -> Bool { !claimed.exchange(true, ordering: .acquiringAndReleasing) }
+    /// How long the work item running now has taken so far (0 when idle). Counted from when it
+    /// started, not when it was queued, so work waiting behind one slow call doesn't look stuck.
+    var busySeconds: Double {
+        let since = runningSince.load(ordering: .relaxed)
+        return since == 0 ? 0 : HostClock.seconds(HostClock.now &- since)
     }
 
-    func run(timeout: Double = 3, _ work: @escaping @Sendable () throws -> Void) async -> Outcome {
+    func run(_ work: @escaping @Sendable () throws -> Void) async -> Outcome {
         await withCheckedContinuation { (continuation: CheckedContinuation<Outcome, Never>) in
-            let once = Once()
             queue.async {
+                self.runningSince.store(HostClock.now, ordering: .relaxed)
                 let outcome: Outcome
                 do {
                     try work()
@@ -47,10 +50,8 @@ final class HALQueue: @unchecked Sendable {
                 } catch {
                     outcome = .failed(error.localizedDescription)
                 }
-                if once.claim() { continuation.resume(returning: outcome) }
-            }
-            DispatchQueue.global().asyncAfter(deadline: .now() + timeout) {
-                if once.claim() { continuation.resume(returning: .timedOut) }
+                self.runningSince.store(0, ordering: .relaxed)
+                continuation.resume(returning: outcome)
             }
         }
     }

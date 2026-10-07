@@ -35,6 +35,12 @@ enum EngineAction: Equatable, Sendable {
     /// Gain only: written to the engine's real-time state, no HAL work.
     case setGain(key: String, gain: Float)
     case destroy(key: String)
+
+    /// Only writes an engine's gain (no engine is created, rebuilt, retargeted or removed).
+    var isGainOnly: Bool {
+        if case .setGain = self { return true }
+        return false
+    }
 }
 
 enum EngineDiff {
@@ -55,14 +61,14 @@ enum EngineDiff {
                 actions.append(.replace(want))
                 continue
             }
+            let membersChanged = Set(want.processObjectIDs) != Set(have.processObjectIDs) || Set(want.bundleIDs) != Set(have.bundleIDs)
             // A rest engine's exclusions change when apps become controlled or go back to
             // default; the new rest engine crosses over with the old one and the app engines.
-            if case .rest = want.kind,
-               Set(want.processObjectIDs) != Set(have.processObjectIDs) || Set(want.bundleIDs) != Set(have.bundleIDs) {
+            if case .rest = want.kind, membersChanged {
                 actions.append(.replace(want))
                 continue
             }
-            if Set(want.processObjectIDs) != Set(have.processObjectIDs) || Set(want.bundleIDs) != Set(have.bundleIDs) {
+            if membersChanged {
                 actions.append(.updateTap(key: key, processObjectIDs: want.processObjectIDs, bundleIDs: want.bundleIDs))
             }
             if abs(want.gain - have.gain) > gainTolerance {

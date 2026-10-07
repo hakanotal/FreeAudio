@@ -1,4 +1,5 @@
 import Foundation
+import os
 import ServiceManagement
 
 /// Manages "Launch at Login" via a per-user launchd agent (~/Library/LaunchAgents).
@@ -133,9 +134,8 @@ final class LaunchService: @unchecked Sendable {
             try data.write(to: agentURL, options: .atomic)
             return true
         } catch {
-            #if DEBUG
-            print("[LaunchService] writing agent plist failed: \(error)")
-            #endif
+            Logger(subsystem: "com.freeaudio.app", category: "launch")
+                .error("Writing the launch agent failed: \(error.localizedDescription, privacy: .public)")
             return false
         }
     }

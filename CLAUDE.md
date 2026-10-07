@@ -2,7 +2,7 @@
 
 Free, open-source SoundSource alternative: a macOS menu bar app for per-app volume and mute, output device control, software volume for outputs without hardware volume (HDMI/DisplayPort), and later per-app routing, EQ and profiles. UI in Turkish and English. Sibling of [FreeDisplay](https://github.com/hakanotal/FreeDisplay); same know-how, same visual style.
 
-**Status:** v1.0 = Phases 0–4 of [docs/ROADMAP.md](docs/ROADMAP.md) (per-app volume, output control, robustness, software volume and volume keys). Phase 5 adds per-app routing, input device/level and reworked sliders; per-app EQ and profiles are out of scope (keep FreeAudio simple). **Start with the roadmap**: decisions, engine design, spikes, phases with acceptance checks. [docs/FREEAUDIO_BRIEF.md](docs/FREEAUDIO_BRIEF.md) keeps the background (Core Audio process taps, style guide); where the two differ, the roadmap wins.
+**Status:** v2.0 = Phases 0–5 of [docs/ROADMAP.md](docs/ROADMAP.md) (per-app volume, output control, robustness, software volume and volume keys, per-app routing, input device/level, reworked sliders, hidden apps) plus a full review pass; per-app EQ and profiles are out of scope (keep FreeAudio simple). **Start with the roadmap**: decisions, engine design, spikes, phases with acceptance checks. [docs/FREEAUDIO_BRIEF.md](docs/FREEAUDIO_BRIEF.md) keeps the background (Core Audio process taps, style guide); where the two differ, the roadmap wins.
 
 Swift 6 + SwiftUI (`MenuBarExtra`) + Core Audio process taps. **Minimum macOS 27, Apple silicon only (arm64).** No third-party dependencies. App Sandbox is off.
 
@@ -46,7 +46,7 @@ Unit tests cover pure logic only (`FreeAudio/Core`, compiled into both the app a
 - Only tap apps whose settings differ from default; destroy taps and aggregate devices when no longer needed and on quit. Taps and aggregate devices are always private.
 - Never tap FreeAudio's own process.
 - Rebuild taps on default-output change, sample-rate/format change, coreaudiod restart and after wake.
-- HAL setup/teardown runs on the serial HAL queue with a timeout (see the roadmap's engine design), never on the main thread.
+- HAL setup/teardown runs on the serial HAL queue (see the roadmap's engine design), never on the main thread. Callers await the real outcome; a call running over 3 s shows the "engine stuck" notice.
 
 **Approved by the user (2026-10-06):** minimum macOS 27; the private APIs `responsibility_get_pid_responsible_for_pid` and `TCCAccessPreflight`/`TCCAccessRequest` (loaded with `dlsym`, with a public fallback); XcodeGen as a dev-only tool.
 

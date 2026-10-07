@@ -19,15 +19,16 @@ struct RealtimeState: ~Copyable {
     let rampStart = Atomic<UInt64>(0)
     let rampDuration = Atomic<UInt64>(0)
 
+    /// The gain the IOProc applied at the end of its last buffer, so fades start from the level
+    /// actually playing.
+    let appliedGain = Atomic<UInt32>(Float(1).bitPattern)
+
     let callbacks = Atomic<UInt64>(0)
     let lastCallbackHost = Atomic<UInt64>(0)
     /// Last callback whose input was above the gate threshold.
     let lastSoundHost = Atomic<UInt64>(0)
     /// First callback after IO (re)started; silence is counted from here until the first sound.
     let ioResumedHost = Atomic<UInt64>(0)
-    let everHadSound = Atomic<Bool>(false)
-    let peakIn = Atomic<UInt32>(0)
-    let peakOut = Atomic<UInt32>(0)
 
     // One-shot buffer layout snapshot for diagnostics, published by `layoutCaptured`.
     let layoutCaptured = Atomic<Bool>(false)
@@ -39,8 +40,9 @@ struct RealtimeState: ~Copyable {
 
     var kernel = KernelState()
     var previousCallbackHost: UInt64 = 0
-    /// A pause longer than this between callbacks means IO resumed (re-arms the output gate).
-    var resumeGapTicks: UInt64 = HostClock.ticks(0.1)
+    /// A pause longer than this (and than three buffers) between callbacks means IO resumed,
+    /// which re-arms the output gate.
+    var minimumResumeGapTicks: UInt64 = HostClock.ticks(0.1)
 }
 
 /// The engines' IOProc. `clientData` is the engine's `UnsafeMutablePointer<RealtimeState>`.
@@ -61,36 +63,39 @@ func freeAudioIOProc(
     let output = UnsafeMutableAudioBufferListPointer(outputData)
 
     let nowHost = now.pointee.mHostTime
-    let previous = rt.pointee.previousCallbackHost
-    let resumed = previous == 0 || nowHost &- previous > rt.pointee.resumeGapTicks
+    var frames = 0
+    if let first = output.first, first.mNumberChannels > 0 {
+        frames = Int(first.mDataByteSize) / 4 / Int(first.mNumberChannels)
+    }
+    let resumed = RenderKernel.isResume(
+        previousHost: rt.pointee.previousCallbackHost, nowHost: nowHost, frames: frames,
+        ticksPerFrame: rt.pointee.kernel.ticksPerFrame, minimumGapTicks: rt.pointee.minimumResumeGapTicks)
     rt.pointee.previousCallbackHost = nowHost
     if resumed { rt.pointee.ioResumedHost.store(nowHost, ordering: .relaxed) }
     rt.pointee.callbacks.add(1, ordering: .relaxed)
     rt.pointee.lastCallbackHost.store(nowHost, ordering: .relaxed)
 
+    let outputHost = outputTime.pointee.mHostTime
+    // Target first: `scheduleRamp` publishes it last, so a new target implies its schedule.
+    let target = Float(bitPattern: rt.pointee.targetGain.load(ordering: .acquiring))
     var schedule: RampSchedule?
     let duration = rt.pointee.rampDuration.load(ordering: .acquiring)
     if duration > 0 {
-        schedule = RampSchedule(
+        let ramp = RampSchedule(
             from: Float(bitPattern: rt.pointee.rampFrom.load(ordering: .relaxed)),
             to: Float(bitPattern: rt.pointee.rampTo.load(ordering: .relaxed)),
             startHost: rt.pointee.rampStart.load(ordering: .relaxed),
             durationTicks: duration)
+        // An ended ramp holds `to`, which is also the target: the kernel's steady path takes over.
+        if !ramp.hasEnded(atHost: outputHost) { schedule = ramp }
     }
-    let target = Float(bitPattern: rt.pointee.targetGain.load(ordering: .relaxed))
     let result = RenderKernel.render(
         input: input, output: output, state: &rt.pointee.kernel, target: target,
-        schedule: schedule, outputHostTime: outputTime.pointee.mHostTime, resumed: resumed)
+        schedule: schedule, outputHostTime: outputHost, resumed: resumed)
 
+    rt.pointee.appliedGain.store(rt.pointee.kernel.gain.bitPattern, ordering: .relaxed)
     if result.peakIn > RenderKernel.gateThreshold {
         rt.pointee.lastSoundHost.store(nowHost, ordering: .relaxed)
-        if !rt.pointee.everHadSound.load(ordering: .relaxed) { rt.pointee.everHadSound.store(true, ordering: .relaxed) }
-    }
-    if result.peakIn > Float(bitPattern: rt.pointee.peakIn.load(ordering: .relaxed)) {
-        rt.pointee.peakIn.store(result.peakIn.bitPattern, ordering: .relaxed)
-    }
-    if result.peakOut > Float(bitPattern: rt.pointee.peakOut.load(ordering: .relaxed)) {
-        rt.pointee.peakOut.store(result.peakOut.bitPattern, ordering: .relaxed)
     }
     if !rt.pointee.layoutCaptured.load(ordering: .relaxed) {
         rt.pointee.inBuffers = UInt32(input.count)
@@ -123,6 +128,7 @@ final class TapEngine: @unchecked Sendable {
         rt = .allocate(capacity: 1)
         rt.initialize(to: RealtimeState())
         rt.pointee.targetGain.store(spec.gain.bitPattern, ordering: .relaxed)
+        rt.pointee.appliedGain.store(spec.gain.bitPattern, ordering: .relaxed)
         rt.pointee.kernel.gain = spec.gain
     }
 
@@ -144,14 +150,26 @@ final class TapEngine: @unchecked Sendable {
         rt.pointee.targetGain.store(gain.bitPattern, ordering: .relaxed)
     }
 
-    /// Linear ramp in host time, for crossfades between engines.
+    /// Linear ramp in host time, for crossfades between engines. The schedule is published
+    /// before the target: a callback that lands in between keeps the old target instead of
+    /// starting towards the new gain and snapping back to `from`.
     func scheduleRamp(from: Float, to: Float, startHost: UInt64, seconds: Double) {
         rt.pointee.rampDuration.store(0, ordering: .releasing)
-        rt.pointee.targetGain.store(to.bitPattern, ordering: .relaxed)
         rt.pointee.rampFrom.store(from.bitPattern, ordering: .relaxed)
         rt.pointee.rampTo.store(to.bitPattern, ordering: .relaxed)
         rt.pointee.rampStart.store(startHost, ordering: .relaxed)
-        rt.pointee.rampDuration.store(HostClock.ticks(seconds), ordering: .releasing)
+        rt.pointee.rampDuration.store(max(HostClock.ticks(seconds), 1), ordering: .releasing)
+        rt.pointee.targetGain.store(to.bitPattern, ordering: .releasing)
+    }
+
+    /// The gain the engine is set to (or ramping to).
+    var currentTarget: Float {
+        Float(bitPattern: rt.pointee.targetGain.load(ordering: .relaxed))
+    }
+
+    /// The gain the engine played its last buffer at (its target before the first buffer).
+    var currentGain: Float {
+        Float(bitPattern: rt.pointee.appliedGain.load(ordering: .relaxed))
     }
 
     struct Stats: Sendable {
@@ -159,15 +177,13 @@ final class TapEngine: @unchecked Sendable {
         var lastCallbackHost: UInt64
         var lastSoundHost: UInt64
         var ioResumedHost: UInt64
-        var everHadSound: Bool
     }
 
     var stats: Stats {
         Stats(callbacks: rt.pointee.callbacks.load(ordering: .relaxed),
               lastCallbackHost: rt.pointee.lastCallbackHost.load(ordering: .relaxed),
               lastSoundHost: rt.pointee.lastSoundHost.load(ordering: .relaxed),
-              ioResumedHost: rt.pointee.ioResumedHost.load(ordering: .relaxed),
-              everHadSound: rt.pointee.everHadSound.load(ordering: .relaxed))
+              ioResumedHost: rt.pointee.ioResumedHost.load(ordering: .relaxed))
     }
 
     // MARK: Setup and teardown (HAL queue)
@@ -236,9 +252,11 @@ final class TapEngine: @unchecked Sendable {
         guard alive else { throw EngineError("aggregate device never became alive") }
 
         // Seed the render state before starting so the first buffer is at the right gain.
-        let sampleRate = (try? aggregate.nominalSampleRate) ?? 48_000
+        // A read of 0 (device mid-reconfiguration) counts as unknown.
+        let sampleRate = (try? aggregate.nominalSampleRate).flatMap { $0 > 0 ? $0 : nil } ?? 48_000
         rt.pointee.kernel.configure(sampleRate: sampleRate, ticksPerSecond: HostClock.ticksPerSecond)
         rt.pointee.kernel.gain = Float(bitPattern: rt.pointee.targetGain.load(ordering: .relaxed))
+        rt.pointee.appliedGain.store(rt.pointee.kernel.gain.bitPattern, ordering: .relaxed)
         let stereo = (try? device.preferredOutputChannelsForStereo) ?? [1, 2]
         if stereo.count == 2 {
             rt.pointee.kernel.stereoLeft = max(Int(stereo[0]) - 1, 0)
@@ -253,7 +271,7 @@ final class TapEngine: @unchecked Sendable {
 
         status = AudioDeviceStart(aggregate.id, newProcID)
         guard status == noErr else { throw EngineError("AudioDeviceStart failed (\(status))") }
-        engineLog.notice("\(self.spec.key, privacy: .public): engine on \(self.spec.deviceUID, privacy: .public) at \(sampleRate) Hz, gain \(self.spec.gain)")
+        engineLog.notice("\(self.spec.key, privacy: .public): engine on \(self.spec.deviceUID, privacy: .private(mask: .hash)) at \(sampleRate) Hz, gain \(self.spec.gain)")
     }
 
     /// Wrapping a duplex device (USB interface, headset) makes the aggregate open its inputs too,
@@ -296,10 +314,13 @@ final class TapEngine: @unchecked Sendable {
 
     /// Stop + start: lets an idle aggregate's IO stop (releasing coreaudiod's sleep assertion)
     /// while keeping the engine ready; `TapAutoStart` resumes IO when the app plays (spike S3).
-    func restartIO() {
+    /// Throws when IO doesn't start again: the tap would keep muting the app with nothing
+    /// playing it, so the caller rebuilds the engine.
+    func restartIO() throws {
         guard let aggregate, let procID else { return }
         AudioDeviceStop(aggregate.id, procID)
-        AudioDeviceStart(aggregate.id, procID)
+        let status = AudioDeviceStart(aggregate.id, procID)
+        guard status == noErr else { throw EngineError("AudioDeviceStart after an idle stop failed (\(status))") }
     }
 
     func stop() {

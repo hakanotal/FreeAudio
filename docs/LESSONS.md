@@ -30,6 +30,11 @@ Hard-won constraints. Each one cost real debugging time; don't relearn them.
 - Count an engine's silence from the first callback after its IO (re)started, not from creation or "never had sound": an app that just started, or a stream moving to another device, is silent for a few hundred ms, and a pre-armed engine may have sat idle for hours before its app starts. Getting this wrong restarted the IO in the middle of playback. (2026-10-06)
 - Phase 3 automated tests (2026-10-06): after a default-output switch the engine moves to the new device ~40 ms later; a sample-rate change on the output (48 → 44.1 → 48 kHz) is detected after the 150 ms debounce and the engine is rebuilt at the new rate; an app quitting leaves its pre-armed engine idle, its IO is restarted 3 s later and coreaudiod's sleep assertion disappears.
 - Core Audio reuses process object IDs after a process exits (three successive `afplay` PIDs all got object 123). Never cache an object ID beyond the process's lifetime.
+- Read `kAudioProcessPropertyDevices` with the output scope: the scope selects the input or output device list, and the Swift `AudioHardwareProcess.devices` takes none. An app in a call also uses its microphone's device. (2026-10-07)
+- The tap is always the last input buffer of its aggregate, whatever the number of output streams. Mapping input to output buffers by count sent a duplex interface's tap to its second output stream. Stereo goes to the device's preferred pair, counted across output buffers; a one-channel output needs a downmix, or the right channel overwrites the left (AirPods in HFP are mono). (2026-10-07)
+- A 30 ms one-pole gain ramp is still at 26% after 40 ms: stopping an engine then clicks. Wait about five time constants (150 ms) before `stop()`. Don't fade out with a ramp scheduled from `mach_absolute_time()`: output timestamps run ahead of now by the output latency (hundreds of ms on Bluetooth), so the ramp can be over before the first buffer it applies to. The one-pole also stalls short of its target in Float (an update stops changing the value about 1e-4 away), so snap it once a step makes no progress. Gain changes made while IO is stopped only move the target: start a resumed engine at the target. (2026-10-07)
+- A failure backoff needs a scheduled retry: filtering failed keys out of the desired set does nothing once the backoff ends unless something reconciles. (2026-10-07)
+- Never retire the old rest engine before its replacement runs, also when the replacement fails: the device jumps to raw level. Call the handover off and keep the old engines. (2026-10-07)
 - A process gets a Core Audio process object as soon as it talks to the HAL, before it plays anything, so FreeAudio can exclude its own object from taps from the start. Process objects also exist for idle apps (`isRunningOutput == false`). (TapLab, 2026-10-06)
 
 ## Permissions and signing
@@ -65,11 +70,14 @@ Hard-won constraints. Each one cost real debugging time; don't relearn them.
 ## SwiftUI / MenuBarExtra
 
 - The macOS 26 `Slider(… neutralValue: … ticks: { SliderTick(…) })` draws tick marks and fills from the neutral value, but the ticks don't snap. Snapping (and the haptic `NSHapticFeedbackManager` click) happens in the value binding (`VolumeSlider`, `SliderDetents`).
+- Arrow keys (Full Keyboard Access) and VoiceOver change a `Slider`'s value without `onEditingChanged`, so apply values in `onChange` of the value, not only while dragging. Snap to detents only during a pointer drag, or a key step smaller than the snap zone can never leave a detent. (2026-10-07)
+- A view that observes a busy `ObservableObject` re-renders on every change of any of its `@Published` properties. Pass rows plain values (and make them `Equatable` when they hold `@State`), so a slider tick re-renders only its own row. (2026-10-07)
 
 - Custom content needs `.menuBarExtraStyle(.window)`. Hide the Dock icon with `INFOPLIST_KEY_LSUIElement: true`.
 - MenuBarExtra content is built lazily and its `.task`/`.onAppear` run on every panel open. Launch, wake and one-time work belongs in `AppDelegate`, and singletons whose init starts work must be touched at launch.
 - `NSWindow(contentRect:…, screen:)` treats the rect as relative to that screen. Pass global rects without `screen:`.
 - On macOS 27 the panel is sized to the content's *minimum* size, so a bare `ScrollView` collapses to 0 height. Pin the scroll view to the measured content height.
+- Don't animate the panel's height (springs, `.move` transitions on expanding sections): the MenuBarExtra window follows the measured content height, so it resizes in steps while rows slide inside it, which feels slow and laggy. Toggle without `withAnimation`, fade new content in briefly (`Disclosure.content`), and animate only the chevron. (2026-10-07)
 - Row components with local state (`isHovered`, `isLoading`) must be separate `struct`s. `@ViewBuilder` functions can't hold `@State`.
 - Observe shared singletons with `@ObservedObject`, not `@StateObject`.
 - Don't make IOKit/CG/Core Audio calls in `body`; load them in `.task`/`onAppear` or a service.
@@ -83,5 +91,6 @@ Hard-won constraints. Each one cost real debugging time; don't relearn them.
 - `deinit` is nonisolated. Properties it touches need `nonisolated(unsafe)`.
 - The Command Line Tools have no SwiftUI macro plugin (`build-app-clt.sh` shims `@State`), and keep the Swift Testing macro plugin in `usr/lib/swift/host/plugins/testing`, which `swift test` doesn't search. Run tests through `./scripts/test.sh`, which adds `-plugin-path`.
 - `hdiutil create -volname … -format …` prints a deprecation warning on macOS 27 (use `diskutil image create`); `build-dmg.sh` still works with it for v1.0.
+- `hdiutil create -srcfolder` copies `.VolumeIcon.icns` but not the folder's custom-icon flag. Create a read-write image, `SetFile -a C` on the mounted volume, then `hdiutil convert` to UDZO (`build-dmg.sh`). (2026-10-07)
 - The release build (`build-dmg.sh`, ad-hoc) overwrites `build/FreeAudio.app`; rebuild with `build-app-clt.sh` afterwards so the local copy is dev-signed again and keeps its permissions.
 - `import IOKit` doesn't include I2C/graphics. Add `import IOKit.i2c` / `import IOKit.graphics`.

@@ -10,10 +10,15 @@ enum PrivateAPI {
 
     /// RTLD_DEFAULT is a cast macro Swift doesn't import.
     private nonisolated(unsafe) static let rtldDefault = UnsafeMutableRawPointer(bitPattern: -2)
-    private nonisolated(unsafe) static let responsibility: ResponsibilityFn? = dlsym(rtldDefault, "responsibility_get_pid_responsible_for_pid")
+    private static let responsibility: ResponsibilityFn? = dlsym(rtldDefault, "responsibility_get_pid_responsible_for_pid")
         .map { unsafeBitCast($0, to: ResponsibilityFn.self) }
 
+    // Resolved once: the status is checked on every reconcile until it is answered.
     private nonisolated(unsafe) static let tcc = dlopen("/System/Library/PrivateFrameworks/TCC.framework/Versions/A/TCC", RTLD_NOW)
+    private static let preflight: PreflightFn? = tcc.flatMap { dlsym($0, "TCCAccessPreflight") }
+        .map { unsafeBitCast($0, to: PreflightFn.self) }
+    private static let request: RequestFn? = tcc.flatMap { dlsym($0, "TCCAccessRequest") }
+        .map { unsafeBitCast($0, to: RequestFn.self) }
     private nonisolated(unsafe) static let audioCaptureService = "kTCCServiceAudioCapture" as CFString
 
     /// The process macOS holds responsible for `pid` (e.g. Safari or Outlook for a WebKit XPC
@@ -30,8 +35,8 @@ enum PrivateAPI {
 
     /// System Audio Recording permission without prompting.
     static func audioCaptureStatus() -> AudioCaptureStatus {
-        guard let tcc, let sym = dlsym(tcc, "TCCAccessPreflight") else { return .unavailable }
-        switch unsafeBitCast(sym, to: PreflightFn.self)(audioCaptureService, nil) {
+        guard let preflight else { return .unavailable }
+        switch preflight(audioCaptureService, nil) {
         case 0: return .authorized
         case 1: return .denied
         default: return .notDetermined
@@ -42,15 +47,16 @@ enum PrivateAPI {
     /// `completion` runs on an arbitrary queue. Returns false when the function is unavailable.
     @discardableResult
     static func requestAudioCapture(_ completion: @escaping @Sendable (Bool) -> Void) -> Bool {
-        guard let tcc, let sym = dlsym(tcc, "TCCAccessRequest") else { return false }
-        unsafeBitCast(sym, to: RequestFn.self)(audioCaptureService, nil) { granted in completion(granted) }
+        guard let request else { return false }
+        request(audioCaptureService, nil) { granted in completion(granted) }
         return true
     }
 }
 
 /// Full path of a process's executable, or nil.
 func executablePath(forPID pid: pid_t) -> String? {
-    var buffer = [CChar](repeating: 0, count: 4 * Int(MAXPATHLEN))
-    guard proc_pidpath(pid, &buffer, UInt32(buffer.count)) > 0 else { return nil }
-    return String(cString: buffer)
+    var buffer = [UInt8](repeating: 0, count: 4 * Int(MAXPATHLEN))
+    let length = proc_pidpath(pid, &buffer, UInt32(buffer.count))
+    guard length > 0 else { return nil }
+    return String(decoding: buffer.prefix(Int(length)), as: UTF8.self)
 }

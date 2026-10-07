@@ -22,10 +22,12 @@ final class PermissionService: ObservableObject, @unchecked Sendable {
         if current != status { status = current }
     }
 
-    /// Shows the macOS prompt if the user hasn't answered it yet. Called when a tap is first needed.
+    /// Shows the macOS prompt if the user hasn't answered it yet. Called on every reconcile that
+    /// needs taps, so it only asks tccd while the answer is still open.
     func requestIfNeeded() {
-        refresh()
         guard status == .notDetermined, !requestInFlight else { return }
+        refresh()
+        guard status == .notDetermined else { return }
         requestInFlight = true
         let started = PrivateAPI.requestAudioCapture { granted in
             engineLog.notice("System Audio Recording request answered: \(granted)")

@@ -41,11 +41,25 @@ ditto "$APP_PATH" "$STAGING_DIR/${APP_NAME}.app"
 ln -s /Applications "$STAGING_DIR/Applications"
 
 echo "=== Creating DMG ==="
-rm -f "$DMG_OUTPUT"
+# The mounted volume shows the app icon (the equalizer). hdiutil copies .VolumeIcon.icns but not
+# the folder's custom-icon flag, so the flag is set on a read-write image, which is then compressed.
+ICON="$APP_PATH/Contents/Resources/AppIcon.icns"
+[ -f "$ICON" ] && cp "$ICON" "$STAGING_DIR/.VolumeIcon.icns"
+RW_DMG="$BUILD_DIR/${APP_NAME}-rw.dmg"
+rm -f "$DMG_OUTPUT" "$RW_DMG"
 hdiutil create -volname "${APP_NAME} ${VERSION}" \
   -srcfolder "$STAGING_DIR" \
-  -ov -format UDZO \
-  "$DMG_OUTPUT" >/dev/null
+  -ov -format UDRW \
+  "$RW_DMG" >/dev/null
+if [ -f "$ICON" ] && command -v SetFile >/dev/null; then
+  MOUNT_DIR="$(mktemp -d)"
+  hdiutil attach -nobrowse -mountpoint "$MOUNT_DIR" "$RW_DMG" >/dev/null
+  SetFile -a C "$MOUNT_DIR" || true
+  hdiutil detach "$MOUNT_DIR" >/dev/null
+  rmdir "$MOUNT_DIR" 2>/dev/null || true
+fi
+hdiutil convert "$RW_DMG" -format UDZO -o "$DMG_OUTPUT" >/dev/null
+rm -f "$RW_DMG"
 rm -rf "$STAGING_DIR"
 
 (cd "$BUILD_DIR" && shasum -a 256 "$(basename "$DMG_OUTPUT")" > "$(basename "$DMG_OUTPUT").sha256")

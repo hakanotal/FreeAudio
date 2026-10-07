@@ -29,6 +29,12 @@ struct DeviceSetting: Codable, Equatable, Sendable {
         softwareVolume >= 0.999 && !softwareMuted
     }
 
+    /// Software volume applies when the device has no settable volume control, or the user
+    /// forced it.
+    func usesSoftwareVolume(hasHardwareVolume: Bool) -> Bool {
+        !hasHardwareVolume || forceSoftware
+    }
+
     /// Linear gain applied in software (0 when muted).
     var gain: Float {
         softwareMuted ? 0 : Float(VolumeCurve.gain(forSlider: softwareVolume))

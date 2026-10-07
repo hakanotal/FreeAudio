@@ -66,12 +66,31 @@ final class DeviceService: ObservableObject, @unchecked Sendable {
 
     func refresh() {
         let system = AudioHardwareSystem.shared
-        let all = (try? system.devices) ?? []
-        let devices = all.compactMap { Self.makeDevice($0, direction: .output) }
-        if devices != outputDevices { outputDevices = devices }
+        var outputs: [AudioDevice] = []
+        var inputs: [AudioDevice] = []
+        // One pass: each device's UID, state and streams are read once for both lists.
+        for device in (try? system.devices) ?? [] {
+            guard let uid = try? device.uid, !uid.hasPrefix(freeAudioAggregatePrefix),
+                  (try? device.isHidden) != true,
+                  (try? device.isAlive) != false else { continue }
+            let directions = ((try? device.streams) ?? []).compactMap { try? $0.direction }
+            let hasOutput = directions.contains(.output)
+            let hasInput = directions.contains(.input)
+            guard hasOutput || hasInput else { continue }
+            let name = (try? device.name) ?? uid
+            let transport = AudioDevice.Transport((try? device.transportType) ?? 0)
+            if hasOutput {
+                outputs.append(AudioDevice(objectID: device.id, uid: uid, name: name, transport: transport,
+                                           hasHardwareVolume: device.isSettable(CoreAudioAddress.virtualMainVolume)))
+            }
+            if hasInput {
+                inputs.append(AudioDevice(objectID: device.id, uid: uid, name: name, transport: transport,
+                                          hasHardwareVolume: device.isSettable(CoreAudioAddress.inputVirtualMainVolume)))
+            }
+        }
+        if outputs != outputDevices { outputDevices = outputs }
         let defaultUID = try? system.defaultOutputDevice?.uid
         if defaultUID != defaultOutputUID { defaultOutputUID = defaultUID }
-        let inputs = all.compactMap { Self.makeDevice($0, direction: .input) }
         if inputs != inputDevices { inputDevices = inputs }
         let defaultInput = try? system.defaultInputDevice?.uid
         if defaultInput != defaultInputUID { defaultInputUID = defaultInput }
@@ -118,26 +137,10 @@ final class DeviceService: ObservableObject, @unchecked Sendable {
             let previous = self.sampleRates[uid]
             self.sampleRates[uid] = rate
             if let previous, previous != rate {
-                engineLog.notice("sample rate of \(uid, privacy: .public): \(previous) → \(rate)")
+                engineLog.notice("sample rate of \(uid, privacy: .private(mask: .hash)): \(previous) → \(rate)")
                 self.sampleRateChanged.send(uid)
             }
         }
-    }
-
-    private static func makeDevice(_ device: AudioHardwareDevice, direction: AudioHardwareDirection) -> AudioDevice? {
-        guard let uid = try? device.uid, !uid.hasPrefix(freeAudioAggregatePrefix),
-              (try? device.isHidden) != true,
-              (try? device.isAlive) != false,
-              ((try? device.streams) ?? []).contains(where: { (try? $0.direction) == direction })
-        else { return nil }
-        let volumeAddress = direction == .output ? CoreAudioAddress.virtualMainVolume : CoreAudioAddress.inputVirtualMainVolume
-        return AudioDevice(
-            objectID: device.id,
-            uid: uid,
-            name: (try? device.name) ?? uid,
-            transport: AudioDevice.Transport((try? device.transportType) ?? 0),
-            hasHardwareVolume: device.isSettable(volumeAddress)
-        )
     }
 
     /// Makes `device` the default input (microphone).

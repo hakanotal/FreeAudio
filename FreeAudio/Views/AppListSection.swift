@@ -5,12 +5,13 @@ struct AppListSection: View {
     @ObservedObject private var appAudio = AppAudioService.shared
     @ObservedObject private var taps = TapService.shared
     @ObservedObject private var settings = SettingsService.shared
+    @ObservedObject private var devices = DeviceService.shared
     @State private var showHidden = false
 
-    private var shownApps: [AudioApp] { appAudio.apps.filter { !settings.hiddenApps.contains($0.id) } }
-    private var hiddenApps: [AudioApp] { appAudio.apps.filter { settings.hiddenApps.contains($0.id) } }
-
     var body: some View {
+        let hiddenIDs = settings.hiddenApps
+        let shownApps = appAudio.apps.filter { !hiddenIDs.contains($0.id) }
+        let hiddenApps = appAudio.apps.filter { hiddenIDs.contains($0.id) }
         VStack(alignment: .leading, spacing: 0) {
             Text(L("Uygulamalar", "Apps"))
                 .font(.caption2)
@@ -53,7 +54,7 @@ struct AppListSection: View {
                     .padding(.vertical, 7)
             } else {
                 ForEach(shownApps) { app in
-                    AppVolumeRow(app: app)
+                    row(for: app, isHidden: false)
                 }
                 if shownApps.isEmpty {
                     Text(L("Tüm açık uygulamalar gizli", "All open apps are hidden"))
@@ -70,13 +71,36 @@ struct AppListSection: View {
                 if showHidden {
                     VStack(spacing: 0) {
                         ForEach(hiddenApps) { app in
-                            AppVolumeRow(app: app)
+                            row(for: app, isHidden: true)
                         }
                     }
-                    .transition(.opacity.combined(with: .move(edge: .top)))
+                    .transition(Disclosure.content)
                 }
             }
         }
+    }
+
+    /// Rows get plain values (no observed objects), so a slider tick re-renders only its own row.
+    private func row(for app: AudioApp, isHidden: Bool) -> AppVolumeRow {
+        let setting = settings.appSetting(for: app.id)
+        return AppVolumeRow(app: app, setting: setting,
+                            routedOutput: RoutedOutput(setting: setting, devices: devices.outputDevices),
+                            isHidden: isHidden)
+    }
+}
+
+/// What an app row shows about the output chosen for the app.
+struct RoutedOutput: Equatable, Sendable {
+    let name: String
+    let symbolName: String
+    let isConnected: Bool
+
+    init?(setting: AppSetting, devices: [AudioDevice]) {
+        guard let uid = setting.outputDeviceUID else { return nil }
+        let device = devices.first { $0.uid == uid }
+        name = device?.name ?? setting.outputDeviceName ?? uid
+        symbolName = device?.symbolName ?? "speaker.slash"
+        isConnected = device != nil
     }
 }
 
@@ -101,7 +125,7 @@ struct HiddenAppsRow: View {
                 .font(.caption)
                 .foregroundColor(.secondary)
                 .rotationEffect(.degrees(isExpanded ? 90 : 0))
-                .animation(.easeInOut(duration: 0.2), value: isExpanded)
+                .animation(Disclosure.chevron, value: isExpanded)
                 .accessibilityHidden(true)
         }
         .padding(.horizontal, 12)
@@ -109,7 +133,7 @@ struct HiddenAppsRow: View {
         .background(Color.primary.opacity(isHovered ? 0.06 : 0))
         .contentShape(Rectangle())
         .onTapGesture {
-            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) { isExpanded.toggle() }
+            isExpanded.toggle()
         }
         .onHover { isHovered = $0 }
         .help(L("Gizlediğiniz uygulamalar; ayarları uygulanmaya devam eder", "Apps you've hidden; their settings still apply"))
@@ -153,10 +177,11 @@ struct NoticeRow: View {
 
 // MARK: - AppVolumeRow
 
-struct AppVolumeRow: View {
+struct AppVolumeRow: View, Equatable {
     let app: AudioApp
-    @ObservedObject private var settings = SettingsService.shared
-    @ObservedObject private var devices = DeviceService.shared
+    let setting: AppSetting
+    let routedOutput: RoutedOutput?
+    let isHidden: Bool
     /// Level in percent, 0–200 (100 = unchanged, in the middle of the slider).
     @State private var localLevel: Double = 100
     @State private var isDragging = false
@@ -165,7 +190,10 @@ struct AppVolumeRow: View {
     @State private var valueHighlighted = false
     @State private var highlightTask: Task<Void, Never>?
 
-    private var setting: AppSetting { settings.appSetting(for: app.id) }
+    /// SwiftUI skips `body` when the row's data is unchanged (`@State` isn't compared).
+    nonisolated static func == (lhs: AppVolumeRow, rhs: AppVolumeRow) -> Bool {
+        lhs.app == rhs.app && lhs.setting == rhs.setting && lhs.routedOutput == rhs.routedOutput && lhs.isHidden == rhs.isHidden
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -187,32 +215,31 @@ struct AppVolumeRow: View {
                             .help(L("Ses çalıyor", "Playing audio"))
                             .accessibilityLabel(L("Ses çalıyor", "Playing audio"))
                     }
-                    if let routedUID = setting.outputDeviceUID {
-                        let device = devices.outputDevices.first { $0.uid == routedUID }
-                        let name = device?.name ?? setting.outputDeviceName ?? routedUID
-                        Image(systemName: device?.symbolName ?? "speaker.slash")
+                    if let routedOutput {
+                        let name = routedOutput.name
+                        Image(systemName: routedOutput.symbolName)
                             .font(.caption2)
-                            .foregroundColor(device != nil ? .blue : .secondary)
-                            .help(device != nil ? L("Çıkış: \(name)", "Output: \(name)")
-                                                : L("Çıkış: \(name) (bağlı değil, sistem varsayılanı kullanılıyor)", "Output: \(name) (not connected, using the system default)"))
+                            .foregroundColor(routedOutput.isConnected ? .blue : .secondary)
+                            .help(routedOutput.isConnected ? L("Çıkış: \(name)", "Output: \(name)")
+                                                           : L("Çıkış: \(name) (bağlı değil, sistem varsayılanı kullanılıyor)", "Output: \(name) (not connected, using the system default)"))
                             .accessibilityLabel(L("Çıkış: \(name)", "Output: \(name)"))
                     }
                     Spacer(minLength: 4)
                 }
                 .contentShape(Rectangle())
                 .onTapGesture {
-                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) { isExpanded.toggle() }
+                    isExpanded.toggle()
                 }
                 .help(L("Ayrıntılar için tıklayın", "Click for details"))
 
                 // Hide/Show and Reset appear while the pointer is over the row.
                 if isHovered {
-                    AppRowActions(app: app)
+                    AppRowActions(app: app, isDefault: setting.isDefault, isHidden: isHidden)
                         .transition(.opacity)
                 }
 
                 Button {
-                    settings.updateAppSetting(app.id, name: app.name) { $0.muted.toggle() }
+                    SettingsService.shared.updateAppSetting(app.id, name: app.name) { $0.muted.toggle() }
                 } label: {
                     Image(systemName: setting.muted ? "speaker.slash.fill" : "speaker.fill")
                         .font(.caption)
@@ -239,8 +266,9 @@ struct AppVolumeRow: View {
                 .frame(width: 112)
                 .opacity(setting.muted ? 0.5 : 1)
                 .onChange(of: localLevel) { _, newValue in
-                    guard isDragging else { return }
-                    commit(newValue)
+                    // Drags, arrow keys and VoiceOver all land here. Syncing from the model sets
+                    // its own value, which is no change.
+                    if abs(newValue - setting.level) >= 0.05 { commit(newValue) }
                 }
                 .accessibilityLabel(L("\(app.name) ses düzeyi", "\(app.name) volume"))
                 .accessibilityValue("\(Int(localLevel.rounded()))%")
@@ -262,8 +290,8 @@ struct AppVolumeRow: View {
             }
 
             if isExpanded {
-                AppDetailView(app: app)
-                    .transition(.opacity.combined(with: .move(edge: .top)))
+                AppDetailView(app: app, setting: setting)
+                    .transition(Disclosure.content)
             }
         }
         .onAppear { localLevel = setting.level }
@@ -284,15 +312,15 @@ struct AppVolumeRow: View {
             }
             .disabled(setting.isDefault)
             Divider()
-            if settings.hiddenApps.contains(app.id) {
+            if isHidden {
                 Button {
-                    settings.setHidden(false, app: app.id)
+                    SettingsService.shared.setHidden(false, app: app.id)
                 } label: {
                     Label(L("Göster", "Show"), systemImage: "eye")
                 }
             } else {
                 Button {
-                    settings.setHidden(true, app: app.id)
+                    SettingsService.shared.setHidden(true, app: app.id)
                 } label: {
                     Label(L("Gizle", "Hide"), systemImage: "eye.slash")
                 }
@@ -301,7 +329,7 @@ struct AppVolumeRow: View {
     }
 
     private func commit(_ value: Double) {
-        settings.updateAppSetting(app.id, name: app.name) { setting in
+        SettingsService.shared.updateAppSetting(app.id, name: app.name) { setting in
             setting.level = value
             // Moving the slider unmutes, like the system volume.
             if setting.muted, value > 0 { setting.muted = false }
@@ -315,21 +343,21 @@ struct AppVolumeRow: View {
 /// has non-default settings, Reset.
 struct AppRowActions: View {
     let app: AudioApp
-    @ObservedObject private var settings = SettingsService.shared
+    let isDefault: Bool
+    let isHidden: Bool
 
     var body: some View {
-        let hidden = settings.hiddenApps.contains(app.id)
         HStack(spacing: 4) {
-            if !settings.appSetting(for: app.id).isDefault {
+            if !isDefault {
                 RowIconButton(systemName: "arrow.counterclockwise",
                               help: L("Varsayılana döndür (%100, sessiz değil, sistem çıkışı)", "Reset to default (100%, unmuted, system output)")) {
-                    settings.resetAppSetting(app.id)
+                    SettingsService.shared.resetAppSetting(app.id)
                 }
             }
-            RowIconButton(systemName: hidden ? "eye" : "eye.slash",
-                          help: hidden ? L("Listede göster", "Show in the list")
-                                       : L("Listeden gizle (ayarları uygulanmaya devam eder)", "Hide from the list (its settings still apply)")) {
-                settings.setHidden(!hidden, app: app.id)
+            RowIconButton(systemName: isHidden ? "eye" : "eye.slash",
+                          help: isHidden ? L("Listede göster", "Show in the list")
+                                         : L("Listeden gizle (ayarları uygulanmaya devam eder)", "Hide from the list (its settings still apply)")) {
+                SettingsService.shared.setHidden(!isHidden, app: app.id)
             }
         }
     }
@@ -363,11 +391,9 @@ struct RowIconButton: View {
 /// Expanded panel under an app row: output device, engine status and reset.
 struct AppDetailView: View {
     let app: AudioApp
-    @ObservedObject private var settings = SettingsService.shared
+    let setting: AppSetting
     @ObservedObject private var taps = TapService.shared
     @ObservedObject private var devices = DeviceService.shared
-
-    private var setting: AppSetting { settings.appSetting(for: app.id) }
 
     private var routedDeviceMissing: Bool {
         guard let uid = setting.outputDeviceUID else { return false }
@@ -401,7 +427,7 @@ struct AppDetailView: View {
                     get: { setting.outputDeviceUID ?? "" },
                     set: { uid in
                         let name = devices.outputDevices.first { $0.uid == uid }?.name
-                        settings.updateAppSetting(app.id, name: app.name) { setting in
+                        SettingsService.shared.updateAppSetting(app.id, name: app.name) { setting in
                             setting.outputDeviceUID = uid.isEmpty ? nil : uid
                             setting.outputDeviceName = uid.isEmpty ? nil : name
                         }
@@ -435,7 +461,7 @@ struct AppDetailView: View {
                     .lineLimit(2)
                 Spacer(minLength: 4)
                 Button(L("Sıfırla", "Reset")) {
-                    settings.resetAppSetting(app.id)
+                    SettingsService.shared.resetAppSetting(app.id)
                 }
                 .buttonStyle(.borderless)
                 .font(.caption)

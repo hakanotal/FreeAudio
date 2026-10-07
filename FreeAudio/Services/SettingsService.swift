@@ -1,6 +1,9 @@
 import Foundation
 import Combine
 import Observation
+import os
+
+private let settingsLog = Logger(subsystem: "com.freeaudio.app", category: "settings")
 
 /// Centralized settings persistence service.
 /// Simple settings use UserDefaults via @AppStorage-compatible keys.
@@ -102,7 +105,7 @@ final class SettingsService: ObservableObject, @unchecked Sendable {
             let backup = supportDir.appendingPathComponent("apps.backup.json")
             try? FileManager.default.removeItem(at: backup)
             try? FileManager.default.moveItem(at: url, to: backup)
-            NSLog("[SettingsService] apps.json unreadable (%@); moved to apps.backup.json", error.localizedDescription)
+            settingsLog.error("apps.json unreadable (\(error.localizedDescription, privacy: .public)); moved to apps.backup.json")
         }
     }
 
@@ -169,7 +172,7 @@ final class SettingsService: ObservableObject, @unchecked Sendable {
             let backup = supportDir.appendingPathComponent("devices.backup.json")
             try? FileManager.default.removeItem(at: backup)
             try? FileManager.default.moveItem(at: url, to: backup)
-            NSLog("[SettingsService] devices.json unreadable (%@); moved to devices.backup.json", error.localizedDescription)
+            settingsLog.error("devices.json unreadable (\(error.localizedDescription, privacy: .public)); moved to devices.backup.json")
         }
     }
 
@@ -186,9 +189,7 @@ final class SettingsService: ObservableObject, @unchecked Sendable {
             let data = try JSONEncoder().encode(value)
             try data.write(to: url, options: .atomic)
         } catch {
-            #if DEBUG
-            print("[SettingsService] Failed to save \(filename): \(error)")
-            #endif
+            settingsLog.error("Saving \(filename, privacy: .public) failed: \(error.localizedDescription, privacy: .public)")
         }
     }
 

@@ -16,6 +16,20 @@ struct MenuItemIcon: View {
     }
 }
 
+// MARK: - Disclosure
+
+/// How sections open and close. The panel's height is not animated: MenuBarExtra sizes its window
+/// to the content, and an animated height change resizes and redraws the window frame by frame,
+/// which lags behind the content (rows sliding under a window that already snapped). The panel
+/// snaps to its new size, new content fades in quickly, closing is immediate, and only the
+/// chevron turns.
+enum Disclosure {
+    static let chevron: Animation = .easeOut(duration: 0.15)
+    static var content: AnyTransition {
+        .asymmetric(insertion: .opacity.animation(.easeOut(duration: 0.12)), removal: .identity)
+    }
+}
+
 // MARK: - ExpandableRow
 
 struct ExpandableRow: View {
@@ -42,18 +56,14 @@ struct ExpandableRow: View {
                 .font(.caption)
                 .foregroundColor(.secondary)
                 .rotationEffect(.degrees(isExpanded ? 90 : 0))
-                .animation(.easeInOut(duration: 0.2), value: isExpanded)
+                .animation(Disclosure.chevron, value: isExpanded)
                 .accessibilityHidden(true)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 7)
         .background(Color.primary.opacity(isHovered ? 0.06 : 0))
         .contentShape(Rectangle())
-        .onTapGesture {
-            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                isExpanded.toggle()
-            }
-        }
+        .onTapGesture { isExpanded.toggle() }
         .onHover { isHovered = $0 }
         .accessibilityLabel(isExpanded ? L("\(label), genişletildi", "\(label), expanded") : L("\(label), daraltıldı", "\(label), collapsed"))
         .accessibilityHint(L("Bu bölümü genişletmek veya daraltmak için tıklayın", "Click to expand or collapse this section"))
@@ -64,7 +74,6 @@ struct ExpandableRow: View {
 
 struct MenuBarView: View {
     @ObservedObject private var updateService = UpdateService.shared
-    @ObservedObject private var settings = SettingsService.shared
     @State private var showSettings: Bool = false
     @State private var quitHovered = false
     @State private var contentHeight: CGFloat = 0
@@ -111,7 +120,7 @@ struct MenuBarView: View {
                 if showSettings {
                     SettingsView()
                         .padding(.leading, 8)
-                        .transition(.opacity.combined(with: .move(edge: .top)))
+                        .transition(Disclosure.content)
                 }
 
                 Divider()
@@ -149,6 +158,7 @@ struct MenuBarView: View {
         // ScrollView's minimum height is 0 (only the footer would show). Pin the ScrollView
         // to the measured content height, capped so long content still scrolls.
         .frame(height: min(contentHeight, 640))
+        .animation(nil, value: contentHeight)
 
         Divider().opacity(0.3)
 
@@ -198,7 +208,9 @@ struct MenuBarView: View {
         }
         .onDisappear { AppAudioService.shared.panelVisible = false }
         .task {
-            if settings.checkUpdatesOnLaunch {
+            // Read, not observed: observing SettingsService here would re-render the whole panel
+            // on every slider tick.
+            if SettingsService.shared.checkUpdatesOnLaunch {
                 await updateService.checkForUpdates()
             }
         }

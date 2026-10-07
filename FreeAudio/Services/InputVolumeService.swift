@@ -19,9 +19,10 @@ final class InputVolumeService: ObservableObject, @unchecked Sendable {
     private var device: AudioHardwareDevice?
     private var listeners: [PropertyListener] = []
 
-    /// Follows the default input. Safe to call repeatedly with the same device.
-    func bind(to audioDevice: AudioDevice?) {
-        guard audioDevice?.uid != deviceUID || audioDevice?.objectID != device?.id else { return }
+    /// Follows the default input. Safe to call repeatedly with the same device; `force`
+    /// re-registers the listeners anyway.
+    func bind(to audioDevice: AudioDevice?, force: Bool = false) {
+        guard force || audioDevice?.uid != deviceUID || audioDevice?.objectID != device?.id else { return }
         listeners.forEach { $0.cancel() }
         listeners = []
         deviceUID = audioDevice?.uid
@@ -41,6 +42,11 @@ final class InputVolumeService: ObservableObject, @unchecked Sendable {
             listeners.append(listener)
         }
         read()
+    }
+
+    /// coreaudiod restarted: its listeners are gone even when the device kept its object ID.
+    func rebind() {
+        bind(to: DeviceService.shared.defaultInput, force: true)
     }
 
     private func read() {

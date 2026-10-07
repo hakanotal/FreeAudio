@@ -77,13 +77,13 @@ struct AudioSettingsRows: View {
                     .font(.caption)
                     .foregroundColor(.secondary)
                     .rotationEffect(.degrees(showSaved ? 90 : 0))
-                    .animation(.easeInOut(duration: 0.2), value: showSaved)
+                    .animation(Disclosure.chevron, value: showSaved)
                     .accessibilityHidden(true)
             }
             .padding(.horizontal, 12)
             .contentShape(Rectangle())
             .onTapGesture {
-                withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) { showSaved.toggle() }
+                showSaved.toggle()
             }
             .help(L("Varsayılandan farklı ayarı olan uygulamalar", "Apps whose settings differ from default"))
             .accessibilityAddTraits(.isButton)
@@ -91,7 +91,7 @@ struct AudioSettingsRows: View {
             if showSaved {
                 SavedAppSettingsList()
                     .padding(.leading, 32)
-                    .transition(.opacity.combined(with: .move(edge: .top)))
+                    .transition(Disclosure.content)
             }
 
             // Restart the audio engine

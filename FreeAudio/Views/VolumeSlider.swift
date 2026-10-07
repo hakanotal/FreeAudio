@@ -10,6 +10,9 @@ struct VolumeSlider: View {
     var neutralValue: Double? = nil
     var onEditingChanged: (Bool) -> Void = { _ in }
     @State private var snappedTo: Double?
+    /// A pointer drag is in progress. Detents only apply then: an arrow-key or VoiceOver step
+    /// smaller than the snap zone would otherwise be pulled back and never leave a detent.
+    @State private var isDragging = false
 
     private static let step: Double = 25
 
@@ -28,12 +31,20 @@ struct VolumeSlider: View {
                     SliderTick(value)
                 }
             },
-            onEditingChanged: onEditingChanged
+            onEditingChanged: { editing in
+                isDragging = editing
+                if !editing { snappedTo = nil }
+                onEditingChanged(editing)
+            }
         )
         .labelsHidden()
     }
 
     private func update(_ raw: Double) {
+        guard isDragging else {
+            percent = min(max(raw, range.lowerBound), range.upperBound)
+            return
+        }
         let value = SliderDetents.snap(raw, step: Self.step, in: range, zone: zone)
         let detent: Double? = value != raw ? value : nil
         if let detent, detent != snappedTo {

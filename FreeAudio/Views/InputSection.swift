@@ -25,7 +25,7 @@ struct InputSection: View {
                 }
                 .padding(.leading, 8)
                 .padding(.vertical, 2)
-                .transition(.opacity.combined(with: .move(edge: .top)))
+                .transition(Disclosure.content)
             }
         }
     }
@@ -104,8 +104,8 @@ struct InputLevelRow: View {
                 }
                 .disabled(!input.canSetVolume)
                 .onChange(of: localPercent) { _, newValue in
-                    guard isDragging else { return }
-                    input.setVolume(newValue / 100)
+                    // Drags, arrow keys and VoiceOver all land here; syncing from the device is no change.
+                    if abs(newValue - input.volume * 100) >= 0.05 { input.setVolume(newValue / 100) }
                 }
                 .accessibilityLabel(L("Giriş düzeyi", "Input level"))
                 .accessibilityValue("\(Int(localPercent.rounded()))%")

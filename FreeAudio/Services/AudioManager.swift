@@ -18,7 +18,7 @@ final class AudioManager: ObservableObject, @unchecked Sendable {
         // Device volume follows the default output.
         devices.$outputDevices
             .combineLatest(devices.$defaultOutputUID)
-            .receive(on: RunLoop.main)
+            .receive(on: DispatchQueue.main)
             .sink { outputDevices, defaultUID in
                 DeviceVolumeService.shared.bind(to: outputDevices.first { $0.uid == defaultUID })
             }
@@ -27,7 +27,7 @@ final class AudioManager: ObservableObject, @unchecked Sendable {
         // Input level follows the default input.
         devices.$inputDevices
             .combineLatest(devices.$defaultInputUID)
-            .receive(on: RunLoop.main)
+            .receive(on: DispatchQueue.main)
             .sink { inputDevices, defaultUID in
                 InputVolumeService.shared.bind(to: inputDevices.first { $0.uid == defaultUID })
             }
@@ -44,6 +44,8 @@ final class AudioManager: ObservableObject, @unchecked Sendable {
                 // Every object ID and listener died with coreaudiod.
                 DeviceService.shared.restartListeners()
                 AppAudioService.shared.restartListeners()
+                DeviceVolumeService.shared.rebind()
+                InputVolumeService.shared.rebind()
                 taps.handleServiceRestart()
             }
             .store(in: &cancellables)
@@ -72,7 +74,7 @@ final class AudioManager: ObservableObject, @unchecked Sendable {
         // The event tap needs Accessibility, so only start it once a software-volume output is
         // in use; it keeps running (passing keys through) afterwards.
         DeviceVolumeService.shared.$tier
-            .receive(on: RunLoop.main)
+            .receive(on: DispatchQueue.main)
             .sink { tier in
                 guard tier == .software else { return }
                 keys.requestTrustIfNeeded()

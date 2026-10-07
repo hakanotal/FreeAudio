@@ -1,5 +1,8 @@
 import AppKit
 import CoreGraphics
+import os
+
+private let keyLog = Logger(subsystem: "com.freeaudio.app", category: "keys")
 
 // MARK: - C Event Tap Callback
 
@@ -72,17 +75,16 @@ final class VolumeKeyService: @unchecked Sendable {
     private static let maxPollRetries = 15
 
     // MARK: - NX Media Key Constants
-    // Marked nonisolated(unsafe) so they can be read from the nonisolated callback method.
-    // These are immutable compile-time constants so there is no data-race risk.
+    // `nonisolated` so the nonisolated callback method can read them (immutable Sendable values).
 
     /// CGEventType raw value for NSSystemDefined / NX_SYSDEFINED events (media keys).
-    private nonisolated(unsafe) static let cgEventTypeSystemDefinedRaw: UInt32 = 14
-    /// NX_SUBTYPE_AUX_CONTROL_BUTTONS — the subtype value for media/function keys.
-    private nonisolated(unsafe) static let nxSubtypeAuxControlButtons: Int16 = 8
+    private nonisolated static let cgEventTypeSystemDefinedRaw: UInt32 = 14
+    /// NX_SUBTYPE_AUX_CONTROL_BUTTONS: the subtype value for media/function keys.
+    private nonisolated static let nxSubtypeAuxControlButtons: Int16 = 8
     /// NX_KEYTYPE_SOUND_UP / NX_KEYTYPE_SOUND_DOWN / NX_KEYTYPE_MUTE
-    private nonisolated(unsafe) static let nxKeytypeSoundUp: Int = 0
-    private nonisolated(unsafe) static let nxKeytypeSoundDown: Int = 1
-    private nonisolated(unsafe) static let nxKeytypeMute: Int = 7
+    private nonisolated static let nxKeytypeSoundUp: Int = 0
+    private nonisolated static let nxKeytypeSoundDown: Int = 1
+    private nonisolated static let nxKeytypeMute: Int = 7
 
     // MARK: - Start / Stop
 
@@ -110,7 +112,7 @@ final class VolumeKeyService: @unchecked Sendable {
         guard let tap else {
             retained.release()
             selfRetained = nil
-            NSLog("[VolumeKeyService] Event tap creation failed — no accessibility permission")
+            keyLog.notice("Event tap creation failed: no Accessibility permission")
             pollForAccessibility()
             return
         }
@@ -122,7 +124,7 @@ final class VolumeKeyService: @unchecked Sendable {
         self.eventTap = tap
         self.runLoopSource = source
 
-        NSLog("[VolumeKeyService] Event tap installed successfully")
+        keyLog.notice("Event tap installed")
     }
 
     /// Removes the event tap and releases the retained self reference.
@@ -149,18 +151,18 @@ final class VolumeKeyService: @unchecked Sendable {
     /// Polls every 2 seconds by attempting to create the tap. Stops after maxPollRetries.
     private func pollForAccessibility() {
         pollTimer?.invalidate()
-        pollTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] timer in
-            guard let self else { timer.invalidate(); return }
-            self.pollRetryCount += 1
-            if self.pollRetryCount > Self.maxPollRetries {
-                NSLog("[VolumeKeyService] Gave up after %d retries — grant Accessibility permission and restart app", Self.maxPollRetries)
-                timer.invalidate()
+        // The timer fires on the main run loop.
+        pollTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
                 self.pollTimer = nil
-                return
+                self.pollRetryCount += 1
+                if self.pollRetryCount > Self.maxPollRetries {
+                    keyLog.notice("Gave up waiting for Accessibility after \(Self.maxPollRetries) retries; opening the panel tries again")
+                    return
+                }
+                self.start()
             }
-            timer.invalidate()
-            self.pollTimer = nil
-            self.start()
         }
     }
 

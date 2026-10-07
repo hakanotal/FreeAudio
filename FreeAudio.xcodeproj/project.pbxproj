@@ -37,6 +37,7 @@
 		C0A2C6786E588C94C2055850 /* AudioDevice.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A209D634AEF05223B9DE900 /* AudioDevice.swift */; };
 		CA0F4CF2D0BE2C8505A12467 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 81520FBB10DFE9FEEE5D2F02 /* Assets.xcassets */; };
 		D234431EBB87F3AB51834410 /* MenuBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B396402B4D3659809C1E3D8 /* MenuBarView.swift */; };
+		D3F364D4E511338AE84EADE1 /* EnginePlan.swift in Sources */ = {isa = PBXBuildFile; fileRef = CB8EB28E462C0B651CEB8F37 /* EnginePlan.swift */; };
 		EAAEDFBC5413702F92937296 /* RenderKernel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 240D0A39409C4B0D8C78E531 /* RenderKernel.swift */; };
 		F7FF453AA52D041177EA14AC /* InputVolumeService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C2619C120973F6C7D54DFB5 /* InputVolumeService.swift */; };
 /* End PBXBuildFile section */
@@ -71,6 +72,7 @@
 		B2B23BE93CE27880A18F9A2C /* AppSetting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSetting.swift; sourceTree = "<group>"; };
 		B8A3B1092A15A25947AC58E6 /* SettingsService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsService.swift; sourceTree = "<group>"; };
 		CAC3EFA2E467F2A499FB7115 /* DeviceService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceService.swift; sourceTree = "<group>"; };
+		CB8EB28E462C0B651CEB8F37 /* EnginePlan.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EnginePlan.swift; sourceTree = "<group>"; };
 		CBDDA5E6E15233F0868E5633 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		D157615545B964D9508B24C2 /* VolumeSlider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VolumeSlider.swift; sourceTree = "<group>"; };
 		D39E766607C217948DA6596C /* FreeAudioApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FreeAudioApp.swift; sourceTree = "<group>"; };
@@ -162,6 +164,7 @@
 				B2B23BE93CE27880A18F9A2C /* AppSetting.swift */,
 				3F77D56D2CE7F2E2AAF59C8D /* DeviceSetting.swift */,
 				3535E833AD4C8180A9475385 /* EngineDiff.swift */,
+				CB8EB28E462C0B651CEB8F37 /* EnginePlan.swift */,
 				240D0A39409C4B0D8C78E531 /* RenderKernel.swift */,
 				F942BDBF5F9378B63098379C /* VolumeCurve.swift */,
 			);
@@ -265,6 +268,7 @@
 				4C7817C07064162BAF486AF5 /* DeviceSetting.swift in Sources */,
 				406456D271B37C171C889F08 /* DeviceVolumeService.swift in Sources */,
 				9C7E42F5E651830BA959293C /* EngineDiff.swift in Sources */,
+				D3F364D4E511338AE84EADE1 /* EnginePlan.swift in Sources */,
 				AC71AF9152CB06ED0C2116E8 /* FreeAudioApp.swift in Sources */,
 				A9CF8CB6E9C4B412D899C502 /* HALQueue.swift in Sources */,
 				29EF95817563EFD70AC36199 /* InputSection.swift in Sources */,
@@ -354,7 +358,7 @@
 				CODE_SIGN_ENTITLEMENTS = FreeAudio/FreeAudio.entitlements;
 				CODE_SIGN_IDENTITY = "-";
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 2;
+				CURRENT_PROJECT_VERSION = 3;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = FreeAudio/Info.plist;
@@ -365,7 +369,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 27.0;
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 2.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.freeaudio.app;
 				SDKROOT = macosx;
 				SWIFT_STRICT_CONCURRENCY = minimal;
@@ -382,7 +386,7 @@
 				CODE_SIGN_ENTITLEMENTS = FreeAudio/FreeAudio.entitlements;
 				CODE_SIGN_IDENTITY = "-";
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 2;
+				CURRENT_PROJECT_VERSION = 3;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = FreeAudio/Info.plist;
@@ -393,7 +397,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 27.0;
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 2.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.freeaudio.app;
 				SDKROOT = macosx;
 				SWIFT_STRICT_CONCURRENCY = minimal;

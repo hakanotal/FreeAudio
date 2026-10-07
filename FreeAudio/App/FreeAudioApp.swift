@@ -10,7 +10,8 @@ struct FreeAudioApp: App {
             // .task/.onAppear run again every time the panel opens.
             MenuBarView()
         } label: {
-            Image(systemName: "speaker.wave.2.fill")
+            // An equalizer, like the app icon (volume rows keep their speaker symbols).
+            Image(systemName: "slider.vertical.3")
         }
         .menuBarExtraStyle(.window)
         // Let the panel shrink back when sections collapse (min-only sizing never shrinks).

@@ -14,7 +14,7 @@ struct OutputDeviceSection: View {
                 if showDevices {
                     DeviceListView()
                         .padding(.leading, 8)
-                        .transition(.opacity.combined(with: .move(edge: .top)))
+                        .transition(Disclosure.content)
                 }
                 DeviceVolumeRow()
             } else {
@@ -48,7 +48,7 @@ struct OutputDeviceRow: View {
                 .font(.caption)
                 .foregroundColor(.secondary)
                 .rotationEffect(.degrees(isExpanded ? 90 : 0))
-                .animation(.easeInOut(duration: 0.2), value: isExpanded)
+                .animation(Disclosure.chevron, value: isExpanded)
                 .accessibilityHidden(true)
         }
         .padding(.horizontal, 12)
@@ -56,7 +56,7 @@ struct OutputDeviceRow: View {
         .background(Color.primary.opacity(isHovered ? 0.06 : 0))
         .contentShape(Rectangle())
         .onTapGesture {
-            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) { isExpanded.toggle() }
+            isExpanded.toggle()
         }
         .onHover { isHovered = $0 }
         .help(L("Çıkış aygıtını değiştirmek için tıklayın", "Click to change the output device"))
@@ -70,11 +70,13 @@ struct OutputDeviceRow: View {
 
 struct DeviceListView: View {
     @ObservedObject private var devices = DeviceService.shared
+    @ObservedObject private var settings = SettingsService.shared
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             ForEach(devices.outputDevices) { device in
-                DeviceListRow(device: device, isCurrent: device.uid == devices.defaultOutputUID)
+                DeviceListRow(device: device, isCurrent: device.uid == devices.defaultOutputUID,
+                              forcedSoftware: settings.deviceSetting(for: device.uid).forceSoftware)
             }
         }
         .padding(.vertical, 2)
@@ -84,10 +86,8 @@ struct DeviceListView: View {
 struct DeviceListRow: View {
     let device: AudioDevice
     let isCurrent: Bool
-    @ObservedObject private var settings = SettingsService.shared
+    let forcedSoftware: Bool
     @State private var isHovered = false
-
-    private var forcedSoftware: Bool { settings.deviceSetting(for: device.uid).forceSoftware }
 
     var body: some View {
         HStack(spacing: 8) {
@@ -219,8 +219,8 @@ struct DeviceVolumeRow: View {
                     }
                 }
                 .onChange(of: localPercent) { _, newValue in
-                    guard isDragging else { return }
-                    volume.setVolume(newValue / 100)
+                    // Drags, arrow keys and VoiceOver all land here; syncing from the device is no change.
+                    if abs(newValue - volume.volume * 100) >= 0.05 { volume.setVolume(newValue / 100) }
                 }
                 .accessibilityLabel(L("Çıkış ses düzeyi", "Output volume"))
                 .accessibilityValue("\(Int(localPercent.rounded()))%")
