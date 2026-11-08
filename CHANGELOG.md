@@ -4,6 +4,13 @@ All notable changes to FreeAudio are documented here.
 
 ---
 
+## v2.1 (2026-11-08)
+
+Fixes:
+
+- Launch at login keeps working after the app (or a folder above it) is moved: FreeAudio points its login item at its current location at launch and after wake, instead of at the path it was first installed to
+- Hardening: an output whose volume control only becomes available a moment after it connects (Bluetooth) is read again after a second, so it gets hardware volume and the normal volume keys instead of staying on software volume
+
 ## v2.0 (2026-10-07)
 
 - **New icon:** an equalizer in the menu bar, for the app and on the installer disk image (volume sliders keep their speaker symbols)

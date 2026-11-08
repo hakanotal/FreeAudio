@@ -39,7 +39,12 @@ final class DeviceVolumeService: ObservableObject, @unchecked Sendable {
                 .sink { [weak self] _ in Task { @MainActor in self?.applyTier(); self?.read() } }
                 .store(in: &cancellables)
         }
-        guard force || audioDevice?.uid != deviceUID || audioDevice?.objectID != device?.id else { return }
+        let sameDevice = audioDevice?.uid == deviceUID && audioDevice?.objectID == device?.id
+        if sameDevice, let audioDevice, audioDevice.name != deviceName { deviceName = audioDevice.name }
+        // A changed capability on the same device (a volume control that only became settable
+        // after a Bluetooth handshake) re-binds too: the tier and the listened-to address depend on it.
+        let capabilityChanged = audioDevice.map { $0.hasHardwareVolume != hasHardwareVolume } ?? false
+        guard force || !sameDevice || capabilityChanged else { return }
         listeners.forEach { $0.cancel() }
         listeners = []
         rereadTask?.cancel()

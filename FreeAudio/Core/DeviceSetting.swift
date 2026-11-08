@@ -80,8 +80,6 @@ enum SoftwareVolumePlan {
     /// Settings key of a device's rest engine.
     static func restKey(deviceUID: String) -> String { "rest:" + deviceUID }
 
-    static func isRestKey(_ key: String) -> Bool { key.hasPrefix("rest:") }
-
     /// The rest engine for `deviceUID`: everything bound for the device except FreeAudio and the
     /// controlled apps. Ownership rule: every process it excludes must be in an app engine, so
     /// it excludes exactly the app engines' processes (and their followed bundle IDs, which

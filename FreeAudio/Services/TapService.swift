@@ -769,13 +769,4 @@ final class TapService: ObservableObject, @unchecked Sendable {
             for engine in all { engine.stop() }
         }
     }
-
-    /// Diagnostics lines for `--dump-audio`.
-    func diagnostics() -> [String] {
-        specs.keys.sorted().compactMap { key in
-            guard let spec = specs[key] else { return nil }
-            let engine = engines[key]
-            return "  \(key): \(spec.kind) device=\(spec.deviceUID) gain=\(spec.gain) processes=\(spec.processObjectIDs) follows=\(spec.bundleIDs) callbacks=\(engine?.stats.callbacks ?? 0)"
-        }
-    }
 }

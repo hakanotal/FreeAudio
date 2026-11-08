@@ -9,7 +9,6 @@ let freeAudioAggregatePrefix = "com.freeaudio.agg."
 enum CoreAudioAddress {
     static let devices = PropertyAddress(kAudioHardwarePropertyDevices)
     static let defaultOutputDevice = PropertyAddress(kAudioHardwarePropertyDefaultOutputDevice)
-    static let defaultSystemOutputDevice = PropertyAddress(kAudioHardwarePropertyDefaultSystemOutputDevice)
     static let processObjectList = PropertyAddress(kAudioHardwarePropertyProcessObjectList)
     static let processIsRunningOutput = PropertyAddress(kAudioProcessPropertyIsRunningOutput)
     static let processOutputDevices = PropertyAddress(kAudioProcessPropertyDevices, scope: kAudioObjectPropertyScopeOutput)

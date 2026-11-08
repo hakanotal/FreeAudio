@@ -87,8 +87,9 @@ final class LaunchService: @unchecked Sendable {
             return enable() && !Self.isManagedLaunch
         }
         guard isEnabled else { return false }
-        let moved = agentProgramPath() != Bundle.main.executablePath
+        let moved = agentNeedsRepair
         if moved {
+            // A managed launch only rewrites the file; launchd reads it at the next login.
             writeAgentPlist()
         }
         if !Self.isManagedLaunch {
@@ -98,7 +99,33 @@ final class LaunchService: @unchecked Sendable {
         return false
     }
 
+    /// Keeps the agent pointing at this copy when the app was moved while it runs (checked after
+    /// wake). Only the file changes: launchd reads it at the next login, and reloading the job
+    /// would end this process.
+    func repairAgentPathIfNeeded() {
+        guard isEnabled, agentNeedsRepair, writeAgentPlist() else { return }
+        Self.log.notice("Launch agent now points at the app's current location")
+    }
+
     // MARK: - Helpers
+
+    private static let log = Logger(subsystem: "com.freeaudio.app", category: "launch")
+
+    /// Where the executable is now, for the agent to start. `Bundle.main.executablePath` keeps the
+    /// launch-time path after the app (or a folder above it) is moved; `proc_pidpath` follows the
+    /// move. nil for a translocated copy (opened from Downloads or a quarantined image): it runs
+    /// from a temporary path that must never be written into the agent.
+    private var agentExecutablePath: String? {
+        guard let path = executablePath(forPID: getpid()) ?? Bundle.main.executablePath,
+              !path.contains("/AppTranslocation/") else { return nil }
+        return path
+    }
+
+    /// The agent starts another path (the app moved), or its plist is unreadable.
+    private var agentNeedsRepair: Bool {
+        guard let current = agentExecutablePath else { return false }
+        return agentProgramPath() != current
+    }
 
     /// Starts the agent so launchd runs a supervised instance; that instance then takes over
     /// from this manually opened one (see AppDelegate). Never called from a launchd-started process.
@@ -115,7 +142,7 @@ final class LaunchService: @unchecked Sendable {
 
     @discardableResult
     private func writeAgentPlist() -> Bool {
-        guard let executable = Bundle.main.executablePath else { return false }
+        guard let executable = agentExecutablePath else { return false }
         let plist: [String: Any] = [
             "Label": Self.agentLabel,
             "ProgramArguments": [executable, Self.managedLaunchArgument],
@@ -134,8 +161,7 @@ final class LaunchService: @unchecked Sendable {
             try data.write(to: agentURL, options: .atomic)
             return true
         } catch {
-            Logger(subsystem: "com.freeaudio.app", category: "launch")
-                .error("Writing the launch agent failed: \(error.localizedDescription, privacy: .public)")
+            Self.log.error("Writing the launch agent failed: \(error.localizedDescription, privacy: .public)")
             return false
         }
     }

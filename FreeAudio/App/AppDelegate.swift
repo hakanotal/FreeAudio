@@ -90,7 +90,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         workspaceObservers.append(NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didWakeNotification, object: nil, queue: .main
         ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.audioManager.handleWake() }
+            MainActor.assumeIsolated {
+                self?.audioManager.handleWake()
+                // The app may have been moved while it ran; keep launch at login pointing at it.
+                LaunchService.shared.repairAgentPathIfNeeded()
+            }
         })
     }
 

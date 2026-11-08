@@ -193,12 +193,6 @@ final class SettingsService: ObservableObject, @unchecked Sendable {
         }
     }
 
-    func load<T: Decodable>(_ type: T.Type, filename: String) -> T? {
-        let url = supportDir.appendingPathComponent(filename)
-        guard let data = try? Data(contentsOf: url) else { return nil }
-        return try? JSONDecoder().decode(type, from: data)
-    }
-
     // MARK: - Load All
 
     private func loadAll() {

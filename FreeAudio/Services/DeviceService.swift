@@ -29,6 +29,7 @@ final class DeviceService: ObservableObject, @unchecked Sendable {
 
     private var listeners: [PropertyListener] = []
     private var refreshTask: Task<Void, Never>?
+    private var settleTask: Task<Void, Never>?
     private var rateListeners: [String: PropertyListener] = [:]
     private var rateListenerObjects: [String: AudioObjectID] = [:]
     private var sampleRates: [String: Double] = [:]
@@ -64,6 +65,17 @@ final class DeviceService: ObservableObject, @unchecked Sendable {
         }
     }
 
+    /// A Bluetooth output can finish its handshake after it is listed, with its volume control not
+    /// settable yet: read the devices once more when it has settled.
+    private func scheduleSettleRefresh() {
+        settleTask?.cancel()
+        settleTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(1))
+            guard !Task.isCancelled else { return }
+            self?.refresh()
+        }
+    }
+
     func refresh() {
         let system = AudioHardwareSystem.shared
         var outputs: [AudioDevice] = []
@@ -88,7 +100,10 @@ final class DeviceService: ObservableObject, @unchecked Sendable {
                                           hasHardwareVolume: device.isSettable(CoreAudioAddress.inputVirtualMainVolume)))
             }
         }
+        let known = Set(outputDevices.map(\.uid))
+        let newBluetooth = outputs.contains { $0.transport == .bluetooth && !known.contains($0.uid) }
         if outputs != outputDevices { outputDevices = outputs }
+        if newBluetooth { scheduleSettleRefresh() }
         let defaultUID = try? system.defaultOutputDevice?.uid
         if defaultUID != defaultOutputUID { defaultOutputUID = defaultUID }
         if inputs != inputDevices { inputDevices = inputs }

@@ -32,7 +32,7 @@ struct SoftwareVolumeTests {
         #expect(rest.bundleIDs == ["app.zen", "com.freeaudio.app", "com.spotify.client"])
         #expect(rest.kind == .rest(stream: 0))
         #expect(rest.gain == 0.4)
-        #expect(SoftwareVolumePlan.isRestKey(rest.key))
+        #expect(rest.key == SoftwareVolumePlan.restKey(deviceUID: "dell"))
     }
 
     @Test func appEnginesOnTheDeviceCarryTheDeviceGain() {

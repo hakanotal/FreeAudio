@@ -107,6 +107,7 @@ FreeAudio leaves apps alone until you change one. An app with a non-default sett
 - **Calls (FaceTime, Zoom, Teams):** while an app is controlled its echo cancellation can't hear its own output. Leave calling apps at 100%.
 - **Other audio tools:** apps that also tap audio (SoundSource, FineTune, eqMac and others) interfere with FreeAudio; FreeAudio shows a notice when one is running.
 - **An app sounds stuck or silent:** Settings → Audio engine → Restart.
+- **Purple dot in the menu bar:** that is macOS's System Audio Recording indicator, and no app can hide it. It shows while FreeAudio is adjusting an app that is playing (or a monitor with software volume below 100%) and is off when none of them play. An app that keeps a silent audio stream open (some browser tabs) can keep it on a little longer. Apps at default settings are never touched, so resetting an app you don't need to adjust keeps the dot off while it plays.
 
 ---
 
