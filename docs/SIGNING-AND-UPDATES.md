@@ -48,7 +48,7 @@ The certificate isn't trusted, and doesn't need to be: `codesign` signs with it,
 2. **Can it update itself?** Only with both assets and write access to the app bundle and its folder (not translocated, not read-only). Otherwise the banner only shows **View** (the release page).
 3. **Download** the checksum and the zip into `itemReplacementDirectory` for the app's volume, so the final swap is a rename, and compare the SHA-256 (CryptoKit).
 4. **Unpack** with `ditto -x -k`.
-5. **Verify:** the app must have the running app's bundle ID and the tag's version, and `SecStaticCodeCheckValidity` (strict, all architectures, nested code) must pass with the running app's own designated requirement, which names the certificate. An ad-hoc dev build has no certificate to pin and only checks that the signature is valid.
+5. **Verify:** the app must have the running app's bundle ID and the tag's version, and `SecStaticCodeCheckValidity` (strict, all architectures, nested code) must pass with `identifier "<bundle ID>" and certificate leaf = H"<SHA-1>"`. The SHA-1 is compiled in (`UpdateService.releaseCertificateSHA1`), not read from the running app, so a contributor's ad-hoc build also refuses anything not signed with the certificate (FreeDisplay reads the running app's requirement and fails open for ad-hoc builds). `release.sh` checks that the pinned value matches the certificate on the Mac.
 6. **Flush** debounced settings (`SettingsService.flushPendingSaves`), then **swap** with `FileManager.replaceItemAt(…, options: .usingNewMetadataOnly)`. The running process keeps its old files until it exits.
 7. **Relaunch** with `NSWorkspace.openApplication` (`createsNewApplicationInstance`, argument `--after-update`). The new copy terminates the old one, which tears down its taps as on any quit, and starts audio as soon as the old process is gone. It skips the hand-over to the launch agent: launchd's first start of a newly written executable is refused ("Launch Constraint Violation"), so the agent starts the new version from the next login. If LaunchServices fails, a launchd-started copy falls back to `launchctl kickstart -k`; otherwise the banner asks the user to reopen FreeAudio.
 8. **Logging:** `log show --predicate 'subsystem == "com.freeaudio.app" AND category == "update"'` (use `/usr/bin/log` in zsh, whose `log` builtin shadows it).
@@ -66,7 +66,8 @@ Users upgrading from v2.1 or earlier go through both prompts once. From v2.2 on,
 
 From a scratch copy of the repo with a test bundle ID (`com.freeaudio.updatetest`), the feed pointed at a local `python3 -m http.server`, and audio startup replaced by "check, then install"; nothing test-only is in the sources:
 
-- **Forged update:** 9.9.1 re-signed ad hoc, with a correct checksum, was refused (`Update to 9.9.1 failed: signature`), and the app stayed on 9.9.
+- **Forged update:** 9.9.1 re-signed ad hoc, with a correct checksum, was refused (`Update to 9.9.1 failed: signature`), and the app stayed on 9.9. Refused too when the running 9.9 was itself signed ad hoc, after the certificate was pinned in the binary.
+- **Ad-hoc running copy:** a 9.9 signed ad hoc installed the certificate-signed 9.9.1.
 - **Signed update:** 9.9 downloaded, verified, swapped and relaunched into 9.9.1 with `--after-update`; the new copy found no newer release, and no crash report was written.
 - The first run showed the new copy waiting the full 5 s for the old one although it had quit in 0.3 s (`NSRunningApplication.isTerminated` lagged). With `kill(pid, 0)` the new copy took over 0.45 s after the swap.
 - Release check: `fa_require_release_signature` passed on the app unpacked from the v2.2 zip.

@@ -9,8 +9,8 @@ import os
 /// Installing: download the release's zip of the app (`FreeAudio-x.y.zip`; the DMG is for
 /// manual installs: a mounted image is a removable volume, which FreeAudio may not read), check
 /// its SHA-256 against the release's `.zip.sha256` file, check that the app inside is the same
-/// app (bundle ID, version) signed with the same certificate as the running copy (its designated
-/// requirement), swap the app bundle, and relaunch. A file FreeAudio downloads itself isn't
+/// app (bundle ID, version) signed with FreeAudio's certificate (pinned in the binary), swap the
+/// app bundle, and relaunch. A file FreeAudio downloads itself isn't
 /// quarantined, so the new version opens without the Gatekeeper prompt, and the stable
 /// certificate keeps the System Audio Recording and Accessibility permissions. When the app
 /// can't replace itself (read-only location, missing release files), the banner only links to
@@ -283,35 +283,29 @@ final class UpdateService: ObservableObject, @unchecked Sendable {
         }
     }
 
-    /// The app must be validly signed and satisfy the running copy's designated requirement,
-    /// which names FreeAudio's certificate: only updates signed with it are installed. A
-    /// development build signed ad hoc has no certificate to pin; then a valid signature and
-    /// the bundle checks above have to do.
+    /// SHA-1 of FreeAudio's code-signing certificate ("FreeAudio Code Signing",
+    /// docs/SIGNING-AND-UPDATES.md). Pinned in the binary, so every copy, including one a
+    /// contributor signed ad hoc, only installs updates signed with it. A new certificate needs a
+    /// new value here, and users of older versions then update by hand once.
+    private nonisolated static let releaseCertificateSHA1 = "8f91f55ba1b09414250a4eba77c5370be81ae910"
+
+    /// The app must be validly signed (strict, nested code) by FreeAudio's certificate, with
+    /// the running app's bundle identifier.
     private nonisolated static func verifySignature(of app: URL) throws {
+        guard let identifier = Bundle.main.bundleIdentifier else { throw UpdateError.signature }
+        let requirementText = "identifier \"\(identifier)\" and certificate leaf = H\"\(releaseCertificateSHA1)\""
+        var requirement: SecRequirement?
         var code: SecStaticCode?
-        guard SecStaticCodeCreateWithPath(app as CFURL, [], &code) == errSecSuccess, let code else {
+        guard SecRequirementCreateWithString(requirementText as CFString, [], &requirement) == errSecSuccess,
+              let requirement,
+              SecStaticCodeCreateWithPath(app as CFURL, [], &code) == errSecSuccess, let code else {
             throw UpdateError.signature
         }
         let flags = SecCSFlags(rawValue: UInt32(kSecCSCheckAllArchitectures)
                                | UInt32(kSecCSStrictValidate) | UInt32(kSecCSCheckNestedCode))
-        guard SecStaticCodeCheckValidity(code, flags, runningAppRequirement()) == errSecSuccess else {
+        guard SecStaticCodeCheckValidity(code, flags, requirement) == errSecSuccess else {
             throw UpdateError.signature
         }
-    }
-
-    /// The running app's designated requirement when it is signed with a certificate.
-    private nonisolated static func runningAppRequirement() -> SecRequirement? {
-        var code: SecStaticCode?
-        guard SecStaticCodeCreateWithPath(Bundle.main.bundleURL as CFURL, [], &code) == errSecSuccess,
-              let code else { return nil }
-        var info: CFDictionary?
-        guard SecCodeCopySigningInformation(code, SecCSFlags(rawValue: UInt32(kSecCSSigningInformation)),
-                                            &info) == errSecSuccess,
-              let certificates = (info as? [String: Any])?[kSecCodeInfoCertificates as String] as? [Any],
-              !certificates.isEmpty else { return nil }
-        var requirement: SecRequirement?
-        guard SecCodeCopyDesignatedRequirement(code, [], &requirement) == errSecSuccess else { return nil }
-        return requirement
     }
 
     /// Swaps the app bundle for the staged one (same volume: an atomic rename). The running

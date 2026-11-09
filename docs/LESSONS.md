@@ -53,6 +53,7 @@ Hard-won constraints. Each one cost real debugging time; don't relearn them.
 - An app may not read a mounted disk image (a removable volume, TCC-protected). Ship updates as a `ditto -c -k --keepParent` zip and unpack with `ditto -x -k`.
 - Files the app downloads itself (URLSession) aren't quarantined: no Gatekeeper prompt for the updated app. Use an ephemeral, cache-free session: a revalidated cached request can come back as 304.
 - launchd's first start of a newly written executable is refused (Launch Constraint Violation) and only its retry 10 s later works. Relaunch an update through LaunchServices (`NSWorkspace.openApplication`, `--after-update`), and don't hand that copy over to the agent.
+- Pin the update's signing certificate in the binary. Checking against the running app's own designated requirement fails open in an ad-hoc build, which has no certificate to require. (2026-11-09)
 - `NSRunningApplication.isTerminated` lagged seconds behind the process's exit while `AppDelegate` polled it: the copy started after an update waited the full 5 s although the old one quit in 0.3 s. Check with `kill(pid, 0)`. (2026-11-08)
 
 ## Private APIs

@@ -19,6 +19,9 @@ ZIP="build/FreeAudio-${VERSION}.zip"
 # Installed copies only accept updates signed with FreeAudio's certificate.
 source "$ROOT/scripts/signing.sh"
 fa_has_signing_identity || { echo "ERROR: no \"$FA_SIGN_IDENTITY\" on this Mac. Run scripts/setup-signing.sh (--import the backup)."; exit 1; }
+# The updater pins the certificate's SHA-1 (UpdateService.releaseCertificateSHA1).
+PINNED="$(sed -n 's/.*releaseCertificateSHA1 = "\([0-9a-f]*\)".*/\1/p' FreeAudio/Services/UpdateService.swift)"
+[ "$PINNED" = "$(fa_signing_identity_hash | tr 'A-F' 'a-f')" ] || { echo "ERROR: the updater pins certificate $PINNED, but this Mac signs with $(fa_signing_identity_hash)."; exit 1; }
 
 echo "=== Building release ${TAG} ==="
 ./scripts/build-dmg.sh
