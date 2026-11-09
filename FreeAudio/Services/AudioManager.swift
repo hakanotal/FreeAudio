@@ -72,12 +72,12 @@ final class AudioManager: ObservableObject, @unchecked Sendable {
             return true
         }
         // The event tap needs Accessibility, so only start it once a software-volume output is
-        // in use; it keeps running (passing keys through) afterwards.
+        // in use; it keeps running (passing keys through) afterwards. Without the permission it
+        // asks for it (once per build) and starts as soon as it is granted.
         DeviceVolumeService.shared.$tier
             .receive(on: DispatchQueue.main)
             .sink { tier in
                 guard tier == .software else { return }
-                keys.requestTrustIfNeeded()
                 keys.startIfNeeded()
             }
             .store(in: &cancellables)

@@ -9,3 +9,8 @@ DerivedData/
 *.dmg
 *.dmg.sha256
 *.xcarchive
+*.zip
+*.zip.sha256
+
+# Code-signing backups (keep them in a password manager, never in the repo)
+*.p12

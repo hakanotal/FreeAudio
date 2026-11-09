@@ -14,9 +14,23 @@ VERSION="${1:-$(sed -n 's/^ *MARKETING_VERSION: *"\{0,1\}\([^"]*\)"\{0,1\}$/\1/p
 VERSION="${VERSION#v}"
 TAG="v${VERSION}"
 DMG="build/FreeAudio-${VERSION}.dmg"
+ZIP="build/FreeAudio-${VERSION}.zip"
+
+# Installed copies only accept updates signed with FreeAudio's certificate.
+source "$ROOT/scripts/signing.sh"
+fa_has_signing_identity || { echo "ERROR: no \"$FA_SIGN_IDENTITY\" on this Mac. Run scripts/setup-signing.sh (--import the backup)."; exit 1; }
 
 echo "=== Building release ${TAG} ==="
 ./scripts/build-dmg.sh
+
+# Check the app in the zip, the way the in-app updater sees it.
+UNPACKED="$(mktemp -d)"
+ditto -x -k "$ZIP" "$UNPACKED"
+fa_require_release_signature "$UNPACKED/FreeAudio.app" || { rm -rf "$UNPACKED"; exit 1; }
+BUNDLE_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$UNPACKED/FreeAudio.app/Contents/Info.plist")"
+rm -rf "$UNPACKED"
+# The updater only installs an app whose version equals the release tag.
+[ "$BUNDLE_VERSION" = "$VERSION" ] || { echo "ERROR: the app is version $BUNDLE_VERSION, the tag is $TAG. Set MARKETING_VERSION in project.yml."; exit 1; }
 
 # Release notes: the "## v<version>" section of CHANGELOG.md (up to the next "## " heading)
 NOTES="$(mktemp)"
@@ -36,7 +50,7 @@ echo "=== Creating GitHub Release ${TAG} ==="
 gh release create "$TAG" \
   --title "FreeAudio ${TAG}" \
   "${NOTES_ARGS[@]}" \
-  "$DMG" "$DMG.sha256"
+  "$DMG" "$DMG.sha256" "$ZIP" "$ZIP.sha256"
 
 rm -f "$NOTES"
 echo "=== Release ${TAG} published ==="

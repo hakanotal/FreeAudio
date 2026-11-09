@@ -4,6 +4,16 @@ All notable changes to FreeAudio are documented here.
 
 ---
 
+## v2.2 (2026-11-08)
+
+- **One-click updates:** when a new version is out, the panel shows "New version available" with **Update**. FreeAudio downloads it, checks its checksum and that it is signed with FreeAudio's certificate, replaces itself and restarts, with no DMG to open and no Gatekeeper prompt. It checks at launch and every few hours while it runs (Settings → "Check for updates automatically"). Updating from v2.1 or earlier is a manual install one last time
+- **Permissions survive updates:** releases are now signed with FreeAudio's own certificate instead of ad hoc, so macOS keeps the System Audio Recording and Accessibility permissions from one version to the next. Coming from v2.1, macOS asks for them once more
+- **Volume-key permission:** when the volume keys can't start, FreeAudio clears its outdated Accessibility entries and shows the system prompt (once per version), and Settings → Volume keys → Open does the same. The keys start as soon as the permission is turned on, without reopening the panel
+
+Fixes:
+
+- A launch that replaces a quitting copy (login hand-over, or the restart after an update) starts audio as soon as the old copy is gone, instead of always waiting 5 seconds
+
 ## v2.1 (2026-11-08)
 
 Fixes:

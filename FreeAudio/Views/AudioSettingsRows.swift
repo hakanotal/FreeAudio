@@ -5,8 +5,11 @@ struct AudioSettingsRows: View {
     @ObservedObject private var settings = SettingsService.shared
     @ObservedObject private var permission = PermissionService.shared
     @ObservedObject private var devices = DeviceService.shared
+    @ObservedObject private var keys = VolumeKeyService.shared
     @State private var showSaved = false
     @State private var keysTrusted = VolumeKeyService.isTrusted
+
+    private var keysReady: Bool { keys.isTapActive || keysTrusted }
 
     private var permissionText: (String, Color) {
         switch permission.status {
@@ -47,19 +50,23 @@ struct AudioSettingsRows: View {
                     Text(L("Ses tuşları", "Volume keys"))
                         .font(.body)
                     Spacer(minLength: 8)
-                    Text(keysTrusted ? L("Hazır", "Ready") : L("Erişilebilirlik izni gerekli", "Needs Accessibility"))
+                    Text(keysReady ? L("Hazır", "Ready") : L("İzin gerekli", "Needs permission"))
                         .font(.caption)
-                        .foregroundColor(keysTrusted ? .green : .orange)
-                    if !keysTrusted {
-                        Button(L("Aç", "Open")) { VolumeKeyService.shared.openAccessibilitySettings() }
-                            .buttonStyle(.borderless)
-                            .font(.caption)
+                        .foregroundColor(keysReady ? .green : .orange)
+                    if !keysReady {
+                        Button(L("Aç", "Open")) {
+                            keys.openPermissionSettings()
+                            keysTrusted = VolumeKeyService.isTrusted
+                        }
+                        .buttonStyle(.borderless)
+                        .font(.caption)
                     }
                 }
                 .padding(.horizontal, 12)
-                .help(L("Yazılım ses düzeyli bir çıkışta (ör. HDMI monitör) ses tuşlarını FreeAudio yönetir. Bunun için Gizlilik ve Güvenlik → Erişilebilirlik altında izin gerekir.",
-                        "On an output with software volume (e.g. an HDMI monitor) FreeAudio handles the volume keys. This needs permission under Privacy & Security → Accessibility."))
+                .help(L("Yazılım ses düzeyli bir çıkışta (ör. HDMI monitör) ses tuşlarını FreeAudio yönetir. Bunun için \(VolumeKeyService.permissionSettingsPath) altında izin gerekir.",
+                        "On an output with software volume (e.g. an HDMI monitor) FreeAudio handles the volume keys. This needs permission under \(VolumeKeyService.permissionSettingsPath)."))
                 .onAppear { keysTrusted = VolumeKeyService.isTrusted }
+                .onChange(of: keys.isTapActive) { keysTrusted = VolumeKeyService.isTrusted }
             }
 
             // Saved per-app settings

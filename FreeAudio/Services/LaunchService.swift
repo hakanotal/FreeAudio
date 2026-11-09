@@ -73,6 +73,15 @@ final class LaunchService: @unchecked Sendable {
         }
     }
 
+    /// Restarts the launchd agent: launchd ends this process and starts the app at the agent's
+    /// path. The updater's fallback when the new version can't be opened directly; launchd's
+    /// first start of a newly written app is refused by macOS and succeeds on its retry 10 s
+    /// later. Returns false if the agent isn't loaded (this process keeps running).
+    @discardableResult
+    func restartAgent() -> Bool {
+        launchctl("kickstart", "-k", job)
+    }
+
     // MARK: - Launch-time Sync
 
     /// Called once at launch: migrates the old SMAppService login item to the agent, keeps the

@@ -2,9 +2,9 @@
 # Build FreeAudio.app with the Command Line Tools only (no Xcode needed).
 #
 #   ./scripts/build-app-clt.sh            # arm64 release build (macOS 27 runs only on Apple silicon)
-#   CODESIGN_IDENTITY=- ./scripts/build-app-clt.sh   # force ad-hoc signing
 #
-# Output: build/FreeAudio.app (signed with "FreeAudio Dev" if that certificate exists, else ad-hoc)
+# Output: build/FreeAudio.app, signed with FreeAudio's certificate when this Mac has it
+# (scripts/signing.sh), ad hoc otherwise
 #
 # Notes:
 # - The CLT toolchain ships without the SwiftUIMacros plugin, so `@State` can't be expanded
@@ -13,9 +13,8 @@
 #   The repository sources are never modified.
 # - Info.plist mirrors the INFOPLIST_KEY_* settings and `info:` properties in project.yml.
 # - Ad-hoc signatures change on every build, so macOS forgets the System Audio Recording and
-#   Accessibility grants each time. When a "FreeAudio Dev" code-signing certificate exists in the
-#   keychain (self-signed, local only) it is used instead, so the grants survive rebuilds.
-#   Release builds (build-dmg.sh) stay ad-hoc.
+#   Accessibility grants each time. With FreeAudio's certificate (scripts/setup-signing.sh) the
+#   grants survive rebuilds and updates.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -25,13 +24,6 @@ APP="$BUILD/FreeAudio.app"
 SDK="$(xcrun --show-sdk-path)"
 ARCHS="${ARCHS:-arm64}"
 MIN_MACOS="27.0"
-if [ -z "${CODESIGN_IDENTITY:-}" ]; then
-  if security find-certificate -c "FreeAudio Dev" >/dev/null 2>&1; then
-    CODESIGN_IDENTITY="FreeAudio Dev"
-  else
-    CODESIGN_IDENTITY="-"
-  fi
-fi
 
 VERSION="$(sed -n 's/^ *MARKETING_VERSION: *"\{0,1\}\([^"]*\)"\{0,1\}$/\1/p' "$ROOT/project.yml")"
 BUILD_NUMBER="$(sed -n 's/^ *CURRENT_PROJECT_VERSION: *"\{0,1\}\([^"]*\)"\{0,1\}$/\1/p' "$ROOT/project.yml")"
@@ -109,10 +101,8 @@ PLIST
 printf 'APPL????' > "$APP/Contents/PkgInfo"
 plutil -lint "$APP/Contents/Info.plist" >/dev/null
 
-echo "==> Signing (identity: $CODESIGN_IDENTITY)"
-xattr -cr "$APP"
-codesign --force --sign "$CODESIGN_IDENTITY" --entitlements "$ROOT/FreeAudio/FreeAudio.entitlements" "$APP"
-codesign --verify --strict "$APP"
+source "$ROOT/scripts/signing.sh"
+fa_sign_app "$APP" "$ROOT/FreeAudio/FreeAudio.entitlements"
 
 echo "==> Built $APP"
 lipo -info "$APP/Contents/MacOS/FreeAudio"

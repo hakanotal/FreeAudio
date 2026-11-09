@@ -16,11 +16,12 @@ Swift 6 + SwiftUI (`MenuBarExtra`) + Core Audio process taps. **Minimum macOS 27
 ```bash
 ./scripts/build-app-clt.sh   # local build → build/FreeAudio.app (no Xcode needed)
 ./scripts/test.sh            # Swift Testing unit tests for FreeAudio/Core (swift test on the CLT)
-./scripts/build-dmg.sh       # release app + DMG in build/
+./scripts/build-dmg.sh       # release app + DMG + update zip in build/
+./scripts/release.sh         # build, verify the signature, publish the GitHub Release (needs the certificate)
 xcodegen generate            # after adding/removing files or editing project.yml (XcodeGen is installed)
 ```
 
-Unit tests cover pure logic only (`FreeAudio/Core`, compiled into both the app and `Package.swift`). Per-app audio, device switching and volume keys must be checked on real hardware (built-in speakers, AirPods, the Dell over USB-C, a USB DAC). `build-app-clt.sh` signs with the local self-signed "FreeAudio Dev" certificate when it exists, so System Audio Recording and Accessibility grants survive rebuilds (ad-hoc signatures change every build). Launch with `open`, not from a shell: a process started from a terminal is judged by the terminal's permissions.
+Unit tests cover pure logic only (`FreeAudio/Core`, compiled into both the app and `Package.swift`). Per-app audio, device switching and volume keys must be checked on real hardware (built-in speakers, AirPods, the Dell over USB-C, a USB DAC). Every build is signed with FreeAudio's self-signed "FreeAudio Code Signing" certificate when this Mac has it (`scripts/signing.sh`; ad hoc otherwise), so System Audio Recording and Accessibility grants survive rebuilds and updates, and the in-app updater only installs releases signed with it. Never lose the certificate's backup (`~/Documents/FreeAudio-signing-backup.p12`) or its password: see [docs/SIGNING-AND-UPDATES.md](docs/SIGNING-AND-UPDATES.md). Launch with `open`, not from a shell: a process started from a terminal is judged by the terminal's permissions.
 
 ## Language
 

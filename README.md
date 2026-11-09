@@ -32,6 +32,7 @@ FreeAudio is the sibling of [FreeDisplay](https://github.com/hakanotal/FreeDispl
 - **Volume keys on those outputs,** with a volume HUD; on other outputs the keys behave as usual.
 - **Follows your setup:** headphones, AirPods and monitors coming and going, sample-rate changes, sleep and wake.
 - **Launch at login** with automatic restart after a crash; quitting or a crash always returns apps to their normal volume.
+- **One-click updates (v2.2):** "Update" in the panel downloads, checks and installs the new version and restarts FreeAudio, keeping its permissions.
 
 See the [CHANGELOG](CHANGELOG.md) for details.
 
@@ -73,13 +74,19 @@ See the [CHANGELOG](CHANGELOG.md) for details.
    ```
 4. The first time you change an app's volume, macOS asks for **System Audio Recording** permission. Allow it.
 
+### Updating
+
+From v2.2 on, the panel shows **New version available → Update** when a release is out (FreeAudio checks at launch and every few hours; turn it off in Settings). It downloads the new version, checks its checksum and that it is signed with FreeAudio's certificate, replaces the app and restarts it. There is no DMG to open and no Gatekeeper prompt, and macOS keeps FreeAudio's permissions. Updating from v2.1 or earlier is a manual install of the DMG, one last time.
+
 ### Option 2: Build from Source
 
 ```bash
 git clone https://github.com/hakanotal/FreeAudio.git
 cd FreeAudio
-./scripts/build-dmg.sh   # → build/FreeAudio.app and build/FreeAudio-<version>.dmg
+./scripts/build-dmg.sh   # → build/FreeAudio.app, build/FreeAudio-<version>.dmg and .zip
 ```
+
+Your own builds are signed ad hoc (they work the same, but macOS asks for the permissions again after each rebuild). Releases are signed with FreeAudio's certificate: see [docs/SIGNING-AND-UPDATES.md](docs/SIGNING-AND-UPDATES.md).
 
 Xcode is optional: without it the script builds with the Command Line Tools (`xcode-select --install`). Run the unit tests with `./scripts/test.sh`. With Xcode you can open `FreeAudio.xcodeproj` (regenerate it with `xcodegen generate` after editing `project.yml`).
 
@@ -90,7 +97,9 @@ Xcode is optional: without it the script builds with the Command Line Tools (`xc
 | Permission | Why |
 |------------|-----|
 | **System Audio Recording** | Per-app volume and software volume work by tapping app audio (Core Audio process taps). Audio is processed live and never recorded or stored |
-| **Accessibility** | Only for the volume keys on outputs with software volume |
+| **Accessibility** | Only for the volume keys on outputs with software volume: **System Settings → Privacy & Security → Device Control and Data Access** (Accessibility before macOS 27). FreeAudio asks with the system prompt; turn it on and the keys work without a restart |
+
+From v2.2 on every release is signed with the same certificate, so both permissions stay granted after updates. Coming from v2.1 or earlier, macOS asks for them once more.
 
 No internet connection required (except the optional update check via the GitHub Releases API).
 

@@ -129,26 +129,7 @@ struct MenuBarView: View {
 
                 // Update notice
                 if updateService.hasUpdate, let ver = updateService.latestVersion {
-                    HStack {
-                        Image(systemName: "arrow.down.circle.fill")
-                            .foregroundColor(.green)
-                            .frame(width: 20)
-                            .accessibilityHidden(true)
-                        Text(L("Yeni sürüm v\(ver) mevcut", "New version v\(ver) available"))
-                            .font(.caption)
-                            .foregroundColor(.green)
-                        Spacer()
-                        Button(L("Görüntüle", "View")) { updateService.openReleasePage() }
-                            .buttonStyle(.plain)
-                            .font(.caption)
-                            .foregroundColor(.blue)
-                            .help(L("En son sürümü indirip yükleyin", "Download and install the latest version"))
-                    }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 5)
-                    .background(Color.green.opacity(0.08))
-                    .cornerRadius(6)
-                    .padding(.horizontal, 8)
+                    UpdateBanner(version: ver)
                 }
 
             }
@@ -213,6 +194,70 @@ struct MenuBarView: View {
             if SettingsService.shared.checkUpdatesOnLaunch {
                 await updateService.checkForUpdates()
             }
+        }
+    }
+}
+
+/// "New version available" with "Update" (download, install, restart) when the app can replace
+/// itself, and a link to the release notes.
+private struct UpdateBanner: View {
+    @ObservedObject private var updates = UpdateService.shared
+    let version: String
+
+    private var isBusy: Bool {
+        updates.installState == .downloading || updates.installState == .installing
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 6) {
+                Image(systemName: "arrow.down.circle.fill")
+                    .foregroundColor(.green)
+                    .frame(width: 20)
+                    .accessibilityHidden(true)
+                Text(statusText)
+                    .font(.caption)
+                    .foregroundColor(.green)
+                Spacer(minLength: 4)
+                if isBusy {
+                    ProgressView()
+                        .scaleEffect(0.5)
+                        .frame(width: 16, height: 16)
+                } else {
+                    Button(L("Görüntüle", "View")) { updates.openReleasePage() }
+                        .buttonStyle(.plain)
+                        .font(.caption)
+                        .foregroundColor(.blue)
+                        .help(L("Sürüm notlarını aç", "Open the release notes"))
+                    if updates.canInstall {
+                        Button(L("Güncelle", "Update")) { Task { await updates.installUpdate() } }
+                            .buttonStyle(.borderedProminent)
+                            .tint(.green)
+                            .controlSize(.small)
+                            .help(L("İndir, kur ve FreeAudio'yu yeniden başlat", "Download, install and restart FreeAudio"))
+                    }
+                }
+            }
+            if case .failed(let message) = updates.installState {
+                Text(message)
+                    .font(.caption2)
+                    .foregroundColor(.red)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.leading, 26)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 5)
+        .background(Color.green.opacity(0.08))
+        .cornerRadius(6)
+        .padding(.horizontal, 8)
+    }
+
+    private var statusText: String {
+        switch updates.installState {
+        case .downloading: return L("v\(version) indiriliyor…", "Downloading v\(version)…")
+        case .installing: return L("v\(version) kuruluyor…", "Installing v\(version)…")
+        case .idle, .failed: return L("Yeni sürüm v\(version) mevcut", "New version v\(version) available")
         }
     }
 }
@@ -296,12 +341,12 @@ struct SettingsView: View {
                 }
             }
 
-            // Check for updates on launch
+            // Check for updates automatically
             Toggle(isOn: $settings.checkUpdatesOnLaunch) {
                 HStack(spacing: 6) {
                     MenuItemIcon(systemName: "arrow.clockwise.circle", color: .blue)
                         .accessibilityHidden(true)
-                    Text(L("Açılışta güncellemeleri denetle", "Check for updates on launch"))
+                    Text(L("Güncellemeleri otomatik denetle", "Check for updates automatically"))
                         .font(.body)
                     Spacer(minLength: 8)
                 }
@@ -309,7 +354,8 @@ struct SettingsView: View {
             .toggleStyle(.switch)
             .controlSize(.small)
             .padding(.horizontal, 12)
-            .help(L("Her açılışta yeni sürüm olup olmadığını otomatik denetle", "Automatically check for a new version on every launch"))
+            .help(L("Açılışta ve birkaç saatte bir yeni sürüm olup olmadığını denetle",
+                    "Check for a new version at launch and every few hours"))
 
             AudioSettingsRows()
         }

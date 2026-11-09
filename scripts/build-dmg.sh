@@ -1,7 +1,9 @@
 #!/bin/bash
-# Build a release FreeAudio.app and package it as build/FreeAudio-<version>.dmg.
+# Build a release FreeAudio.app and package it as build/FreeAudio-<version>.dmg (manual
+# installs) and build/FreeAudio-<version>.zip (in-app updates), each with a .sha256 file.
 # Uses Xcode when available; otherwise falls back to the Command Line Tools build
-# (scripts/build-app-clt.sh). Both produce an arm64 (macOS 27 is Apple silicon only), ad-hoc signed app.
+# (scripts/build-app-clt.sh). Both produce an arm64 app (macOS 27 is Apple silicon only), signed
+# with FreeAudio's certificate when this Mac has it (scripts/signing.sh), ad hoc otherwise.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -23,15 +25,19 @@ if xcodebuild -version >/dev/null 2>&1; then
   APP_PATH="$BUILD_DIR/DerivedData/Build/Products/Release/${APP_NAME}.app"
   [ -d "$APP_PATH" ] || { echo "ERROR: ${APP_NAME}.app not found in build output"; exit 1; }
 
-  echo "=== Signing (ad-hoc) ==="
-  xattr -cr "$APP_PATH"
-  codesign --force --sign - --entitlements "$APP_NAME/$APP_NAME.entitlements" "$APP_PATH"
+  source "$ROOT/scripts/signing.sh"
+  fa_sign_app "$APP_PATH" "$ROOT/$APP_NAME/$APP_NAME.entitlements"
 else
   echo "=== Xcode not found; building ${APP_NAME} ${VERSION} with Command Line Tools ==="
-  # Releases are ad-hoc signed; the local "FreeAudio Dev" identity is for development only.
-  CODESIGN_IDENTITY=- "$ROOT/scripts/build-app-clt.sh"
+  "$ROOT/scripts/build-app-clt.sh"
   APP_PATH="$BUILD_DIR/${APP_NAME}.app"
 fi
+
+# The zip the in-app updater installs (a mounted DMG is a removable volume, which the app may
+# not read). ditto keeps the bundle's symlinks, permissions and signature.
+ZIP_OUTPUT="$BUILD_DIR/${APP_NAME}-${VERSION}.zip"
+rm -f "$ZIP_OUTPUT"
+ditto -c -k --keepParent "$APP_PATH" "$ZIP_OUTPUT"
 
 # Stage the app next to an /Applications shortcut for drag-to-install
 STAGING_DIR="$BUILD_DIR/dmg-staging"
@@ -62,8 +68,10 @@ hdiutil convert "$RW_DMG" -format UDZO -o "$DMG_OUTPUT" >/dev/null
 rm -f "$RW_DMG"
 rm -rf "$STAGING_DIR"
 
-(cd "$BUILD_DIR" && shasum -a 256 "$(basename "$DMG_OUTPUT")" > "$(basename "$DMG_OUTPUT").sha256")
+for FILE in "$DMG_OUTPUT" "$ZIP_OUTPUT"; do
+  (cd "$BUILD_DIR" && shasum -a 256 "$(basename "$FILE")" > "$(basename "$FILE").sha256")
+done
 
 echo "=== Done ==="
-ls -lh "$DMG_OUTPUT"
-cat "$DMG_OUTPUT.sha256"
+ls -lh "$DMG_OUTPUT" "$ZIP_OUTPUT"
+cat "$DMG_OUTPUT.sha256" "$ZIP_OUTPUT.sha256"

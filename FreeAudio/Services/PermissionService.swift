@@ -40,6 +40,25 @@ final class PermissionService: ObservableObject, @unchecked Sendable {
         if !started { requestInFlight = false }
     }
 
+    /// `tccutil reset <service> <this app's bundle ID>`: clears only FreeAudio's own record, so
+    /// macOS asks again. Used for records an earlier build with another signature left behind
+    /// (every ad-hoc build): they keep failing ("Failed to match existing code requirement")
+    /// even after the user turns FreeAudio on in System Settings.
+    static func resetOwnRecord(_ service: String) {
+        guard let bundleID = Bundle.main.bundleIdentifier else { return }
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/tccutil")
+        process.arguments = ["reset", service, bundleID]
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        do {
+            try process.run()
+            process.waitUntilExit()  // returns at once
+        } catch {
+            engineLog.error("tccutil reset \(service, privacy: .public) failed: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
     /// Opens System Settings → Privacy & Security → Screen & System Audio Recording.
     func openSystemSettings() {
         if let url = URL(string: "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_ScreenCapture") {

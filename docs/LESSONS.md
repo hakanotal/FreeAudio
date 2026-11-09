@@ -42,7 +42,18 @@ Hard-won constraints. Each one cost real debugging time; don't relearn them.
 ## Permissions and signing
 
 - macOS judges a process started from a terminal by the terminal app's grants (the responsible process). `FreeAudio --dump-audio` run from a shell reports Cursor's System Audio Recording status, not FreeAudio's. Launch with `open` for anything permission-related.
-- Ad-hoc signatures change every build, and TCC drops the grant each time. A self-signed "FreeAudio Dev" code-signing certificate (imported with `security import … -T /usr/bin/codesign`; untrusted is fine) gives a designated requirement of `identifier "com.freeaudio.app" and certificate leaf = H"…"`, which is stable, so grants survive rebuilds. `build-app-clt.sh` uses it automatically; release builds stay ad-hoc.
+- Ad-hoc signatures change every build, and TCC drops the grant each time. A self-signed code-signing certificate gives a designated requirement of `identifier "com.freeaudio.app" and certificate leaf = H"…"`, which is stable, so grants survive rebuilds and updates. Since v2.2 every build (dev and release) is signed with "FreeAudio Code Signing" from its own keychain (`scripts/signing.sh`, `scripts/setup-signing.sh`; details in [SIGNING-AND-UPDATES.md](SIGNING-AND-UPDATES.md)). It replaced the earlier dev-only "FreeAudio Dev" certificate. (2026-11-08)
+- `codesign` accepts an untrusted self-signed identity from a dedicated keychain (`--keychain`) after `set-key-partition-list`; no trust settings, no prompts. `codesign -dv` shows no `Authority=` line for it: check `codesign -d -r-` instead.
+- Create PKCS#12 files with `/usr/bin/openssl` (LibreSSL). Homebrew's OpenSSL 3 writes ones the keychain rejects ("MAC verification failed"). Exporting a private key from a keychain always shows a GUI confirmation: write the backup when generating the key.
+- A System Audio Recording record made under another signature reads as not determined (`TCCAccessPreflight` returns 2, not 1), so `PermissionService` asks again by itself; no reset needed. Seen with a build under the new certificate while the record belonged to "FreeAudio Dev". (2026-11-08)
+- An active event tap rests on the Accessibility grant ("Device Control and Data Access" on macOS 27); PostEvent/ListenEvent are derived from it and never prompt. Records from an earlier signature deny silently, and flipping the switch doesn't repair them: `tccutil reset` the app's own Accessibility/PostEvent/ListenEvent records, then `AXIsProcessTrustedWithOptions(prompt: true)` (`VolumeKeyService`, learned in FreeDisplay).
+
+## Updates
+
+- An app may not read a mounted disk image (a removable volume, TCC-protected). Ship updates as a `ditto -c -k --keepParent` zip and unpack with `ditto -x -k`.
+- Files the app downloads itself (URLSession) aren't quarantined: no Gatekeeper prompt for the updated app. Use an ephemeral, cache-free session: a revalidated cached request can come back as 304.
+- launchd's first start of a newly written executable is refused (Launch Constraint Violation) and only its retry 10 s later works. Relaunch an update through LaunchServices (`NSWorkspace.openApplication`, `--after-update`), and don't hand that copy over to the agent.
+- `NSRunningApplication.isTerminated` lagged seconds behind the process's exit while `AppDelegate` polled it: the copy started after an update waited the full 5 s although the old one quit in 0.3 s. Check with `kill(pid, 0)`. (2026-11-08)
 
 ## Private APIs
 
@@ -95,5 +106,5 @@ Hard-won constraints. Each one cost real debugging time; don't relearn them.
 - The Command Line Tools have no SwiftUI macro plugin (`build-app-clt.sh` shims `@State`), and keep the Swift Testing macro plugin in `usr/lib/swift/host/plugins/testing`, which `swift test` doesn't search. Run tests through `./scripts/test.sh`, which adds `-plugin-path`.
 - `hdiutil create -volname … -format …` prints a deprecation warning on macOS 27 (use `diskutil image create`); `build-dmg.sh` still works with it for v1.0.
 - `hdiutil create -srcfolder` copies `.VolumeIcon.icns` but not the folder's custom-icon flag. Create a read-write image, `SetFile -a C` on the mounted volume, then `hdiutil convert` to UDZO (`build-dmg.sh`). (2026-10-07)
-- The release build (`build-dmg.sh`, ad-hoc) overwrites `build/FreeAudio.app`; rebuild with `build-app-clt.sh` afterwards so the local copy is dev-signed again and keeps its permissions.
+- The release build (`build-dmg.sh`) overwrites `build/FreeAudio.app`. Both scripts sign with the same certificate, so the local copy keeps its permissions either way.
 - `import IOKit` doesn't include I2C/graphics. Add `import IOKit.i2c` / `import IOKit.graphics`.

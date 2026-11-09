@@ -33,10 +33,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             $0.bundleIdentifier == Bundle.main.bundleIdentifier &&
             $0.processIdentifier != ProcessInfo.processInfo.processIdentifier
         }
-        let managed = LaunchService.isManagedLaunch
-        if managed {
-            // Started by the launchd agent (login / crash restart / hand-over): replace the
-            // manually opened copy so the supervised instance is the one that keeps running.
+        // Started by the launchd agent (login / crash restart / hand-over), or the new version an
+        // update just installed: replace the running copy so this one keeps running.
+        let replacesOthers = LaunchService.isManagedLaunch || UpdateService.isRelaunchAfterUpdate
+        if replacesOthers {
             otherInstances.forEach { $0.terminate() }
         }
 
@@ -45,8 +45,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // starting audio work (taps from two processes on the same device interfere). A
             // manual launch also waits briefly: the other copy may be quitting, or be a
             // short-lived `--dump-audio` run.
-            await Self.waitForTermination(of: otherInstances, timeout: managed ? 5 : 2)
-            if !managed, otherInstances.contains(where: { !$0.isTerminated }) {
+            await Self.waitForTermination(of: otherInstances, timeout: replacesOthers ? 5 : 2)
+            if !replacesOthers, otherInstances.contains(where: Self.isAlive) {
                 print("[FreeAudio] Another instance is already running, exiting.")
                 NSApp.terminate(nil)
                 return
@@ -66,6 +66,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Startup
 
     private func startServices() {
+        // A copy started by the updater keeps running: handing it over to the agent now would
+        // have launchd start the newly written app, which macOS refuses the first time (Launch
+        // Constraint Violation). The agent starts the new version from the next login.
+        if UpdateService.isRelaunchAfterUpdate {
+            SettingsService.shared.launchAtLogin = LaunchService.shared.isEnabled
+            startAudio()
+            return
+        }
         // Migrate the old login item / hand a manual launch over to the launchd agent.
         let handedOver = LaunchService.shared.prepareAtLaunch()
         SettingsService.shared.launchAtLogin = LaunchService.shared.isEnabled
@@ -96,12 +104,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 LaunchService.shared.repairAgentPathIfNeeded()
             }
         })
+
+        if SettingsService.shared.checkUpdatesOnLaunch {
+            Task { await UpdateService.shared.checkForUpdates() }
+        }
+        UpdateService.shared.startPeriodicChecks()
     }
 
     private static func waitForTermination(of apps: [NSRunningApplication], timeout: TimeInterval) async {
         let deadline = Date().addingTimeInterval(timeout)
-        while apps.contains(where: { !$0.isTerminated }), Date() < deadline {
+        while apps.contains(where: isAlive), Date() < deadline {
             try? await Task.sleep(nanoseconds: 100_000_000)
         }
+    }
+
+    /// Asks the kernel, not `NSRunningApplication.isTerminated`: that flag lagged seconds behind
+    /// the exit while this loop polled it, so a copy that quit in 0.3 s still cost the full wait.
+    private static func isAlive(_ app: NSRunningApplication) -> Bool {
+        kill(app.processIdentifier, 0) == 0 || errno == EPERM
     }
 }
